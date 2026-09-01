@@ -27,7 +27,7 @@
 - CSV 구분자·인코딩 자동 판별과 사용자 재지정
 - 컬럼 매핑, 정규화, canonical dataset/row와 import diagnostics
 - 프로젝트 코드 추출과 파일 묶음 identity 일치·충돌 판정
-- R2 저장 성공/D1 완료 실패 복구, 만료·중단 업로드 정리와 상태 조회
+- 자동 R2/D1 orphan reconciliation, 만료·중단 업로드 정리와 상태 조회
 - 조적 전면 제외와 부위 하드룰을 포함한 FIN 결정론 검수
 - RC 규칙, Finding/Evidence, 조정·재실행
 - 보고서·승인·감사 관리

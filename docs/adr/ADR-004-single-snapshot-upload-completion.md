@@ -21,8 +21,9 @@ read the object again, creating another time-of-check/time-of-use boundary.
   operation. It claims the attempt, reads one byte snapshot, checks declared
   size and structural safety, derives SHA-256, writes that exact snapshot to
   private R2, and records D1 completion.
-- The client never receives or supplies an R2 key, checksum, detected type or
-  validation result.
+- The client never supplies an authoritative checksum and never receives an R2
+  key or object URL. The server may return its derived checksum, detected type
+  and bounded validation warning codes for local progress and retry UX.
 - The canonical object key remains
   `projects/{projectId}/cases/{caseId}/sources/{sourceVersionId}/files/{fileId}.{extension}`.
 - Same-byte retry is idempotent. Different bytes at the same immutable key are

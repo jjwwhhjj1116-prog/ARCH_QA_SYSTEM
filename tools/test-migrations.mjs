@@ -75,9 +75,9 @@ try {
     '--persist-to',
     stateDir,
     '--command',
-    "SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type='table' AND name IN ('project','project_member','review_case','audit_event','source_package','source_file','source_file_version','upload_attempt','import_job');",
+    "SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type='table' AND name IN ('user_profile','project','project_member','review_case','audit_event','source_package','source_file','source_file_version','upload_attempt','import_job');",
   ]);
-  if (!verify.includes('"table_count": 9')) {
+  if (!verify.includes('"table_count": 10')) {
     throw new Error('expected Phase 1 and ingestion tables were not created');
   }
 
