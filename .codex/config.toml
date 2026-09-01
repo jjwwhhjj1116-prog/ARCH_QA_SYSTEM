@@ -1,0 +1,23 @@
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4
+interrupt_message = true
+
+# ThreeUI MCP may require a Pro entitlement and OAuth login. It is intentionally
+# non-required so the core product remains buildable with the official Community
+# package or without a ThreeUI enhancement. Verify the advertised endpoint and
+# tool schemas before use; keep credentials out of this file.
+[mcp_servers.threeui]
+url = "https://threeui.com/api/mcp"
+auth = "oauth"
+enabled = true
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 90
+enabled_tools = [
+  "search_catalog",
+  "get_catalog_item",
+  "get_item_source",
+  "get_item_prompt",
+]
+default_tools_approval_mode = "auto"

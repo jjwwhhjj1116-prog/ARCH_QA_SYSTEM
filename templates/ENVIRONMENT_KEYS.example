@@ -1,0 +1,18 @@
+# Documentation-only inventory. Do not put secret values in this file.
+# Configure real secrets in the Sites project settings or approved secret store.
+
+# Optional AI provider configuration
+AI_PROVIDER=
+AI_MODEL=
+AI_FEATURE_ENABLED=false
+
+# Operational configuration
+APP_ENV=development
+LOG_LEVEL=info
+DATA_RETENTION_DAYS=
+
+# Binding names must match the inspected Sites project and hosting manifest.
+D1_BINDING_NAME=
+R2_BINDING_NAME=
+
+# Never add tokens, passwords, private keys, or connection credentials here.
