@@ -19,11 +19,13 @@ Target: D1 relational metadata plus R2 object content. Confirm exact SQL feature
 project
   ├─ project_member
   ├─ review_case
-  │    ├─ source_file ─ source_file_version ─ import_job
-  │    │                                  ├─ import_sheet
-  │    │                                  ├─ mapping_version
-  │    │                                  ├─ canonical_dataset ─ canonical_row
-  │    │                                  └─ import_diagnostic
+  │    ├─ source_package ─ source_file ─ source_file_version
+  │    │                                      ├─ upload_attempt
+  │    │                                      └─ import_job
+  │    │                                           ├─ import_sheet
+  │    │                                           ├─ mapping_version
+  │    │                                           ├─ canonical_dataset ─ canonical_row
+  │    │                                           └─ import_diagnostic
   │    ├─ review_run ─ rule_result ─ finding ─ finding_evidence
   │    │                                  ├─ finding_decision
   │    │                                  ├─ finding_comment
@@ -93,65 +95,97 @@ At least one active owner must remain.
 | `version`                                               | optimistic concurrency               |
 | timestamps                                              | lifecycle                            |
 
-### 3.5 `source_file`
+### 3.5 `source_package`
+
+One upload intent for a project/case-scoped set of 산출서와 집계표.
+
+| Column                               | Notes                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------- |
+| `id`, `project_id`, `review_case_id` | composite scope; the case must belong to the project                             |
+| `display_name`                       | bounded user-facing package label                                                |
+| `status`                             | receiving/validating/stored_unverified/identity_matched/blocked/rejected/aborted |
+| `project_identity_status`            | pending/matched/unknown/conflict                                                 |
+| `hard_rule_version`                  | ingestion hard-rule snapshot                                                     |
+| `idempotency_key`, `request_hash`    | unique and replay-checked per project/case/actor                                 |
+| `version`                            | optimistic transition version                                                    |
+| `created_by`, `created_at`           | audit                                                                            |
+
+The current migrations implement this aggregate. Semantic identity matching is
+not implemented, so a successfully stored package remains `stored_unverified`.
+
+### 3.6 `source_file`
 
 Logical file identity across revisions.
 
-| Column                               | Notes                                |
-| ------------------------------------ | ------------------------------------ |
-| `id`, `project_id`, `review_case_id` | scope                                |
-| `purpose`                            | quantity_source/reference/attachment |
-| `display_name`                       | sanitized display name               |
-| `status`                             | active/archived                      |
-| `created_by`, `created_at`           | audit                                |
+| Column                                             | Notes                                |
+| -------------------------------------------------- | ------------------------------------ |
+| `id`, `package_id`, `project_id`, `review_case_id` | composite scope                      |
+| `purpose`                                          | quantity_source/reference/attachment |
+| `declared_document_kind`                           | takeoff/summary/unknown              |
+| `display_name`                                     | sanitized display name               |
+| `status`                                           | active/archived                      |
+| `created_by`, `created_at`                         | audit                                |
 
-### 3.6 `source_file_version`
+### 3.7 `source_file_version`
 
 Immutable after `stored`.
 
-| Column                                          | Notes                                             |
-| ----------------------------------------------- | ------------------------------------------------- |
-| `id`, `source_file_id`, `project_id`            | denormalized project for safe scoping             |
-| `version_number`                                | unique per source file                            |
-| `original_filename`                             | safe bounded text                                 |
-| `content_type_claimed`, `content_type_detected` | validation evidence                               |
-| `size_bytes`                                    | integer                                           |
-| `sha256`                                        | content checksum                                  |
-| `r2_object_key`                                 | private opaque key                                |
-| `status`                                        | upload_pending/validating/stored/rejected/deleted |
-| `validation_summary_json`                       | bounded immutable snapshot                        |
-| `created_by`, `created_at`, `stored_at`         | audit                                             |
+| Column                                                               | Notes                                             |
+| -------------------------------------------------------------------- | ------------------------------------------------- |
+| `id`, `source_file_id`, `package_id`, `project_id`, `review_case_id` | denormalized composite scope                      |
+| `version_number`                                                     | unique per source file                            |
+| `original_filename`                                                  | safe bounded text                                 |
+| `content_type_claimed`, `content_type_detected`                      | validation evidence                               |
+| `size_bytes`                                                         | integer                                           |
+| `sha256`                                                             | content checksum                                  |
+| `r2_object_key`                                                      | private opaque key                                |
+| `status`                                                             | upload_pending/validating/stored/rejected/deleted |
+| `project_identity_status`                                            | pending/matched/unknown/conflict                  |
+| `validation_summary_json`                                            | bounded immutable snapshot                        |
+| `created_by`, `created_at`, `stored_at`                              | audit                                             |
 
 Recommended uniqueness: `(project_id, sha256, purpose)` may detect duplicates but must not prevent intentional versioning without a business decision.
 
-### 3.7 `upload_attempt`
+The implemented `stored` invariant requires detected extension/type, SHA-256,
+validation summary and `stored_at`; a metadata-only row cannot be marked stored.
+
+### 3.8 `upload_attempt`
 
 Tracks R2/D1 reconciliation.
 
-| Column                                       | Notes                                               |
-| -------------------------------------------- | --------------------------------------------------- |
-| `id`, `project_id`, `source_file_version_id` | scope                                               |
-| `state`                                      | created/uploading/uploaded/finalized/failed/expired |
-| `idempotency_key`                            | unique per actor/project operation                  |
-| `r2_object_key`                              | generated server-side                               |
-| `error_code`, `correlation_id`               | safe diagnostics                                    |
-| timestamps                                   | lifecycle                                           |
+| Column                                                                       | Notes                                               |
+| ---------------------------------------------------------------------------- | --------------------------------------------------- |
+| `id`, `project_id`, `review_case_id`, `package_id`, `source_file_version_id` | composite scope                                     |
+| `state`                                                                      | created/uploading/uploaded/finalized/failed/expired |
+| `idempotency_key`                                                            | unique per actor/project/case operation             |
+| `r2_object_key`                                                              | generated server-side                               |
+| `expected_size`, `version`, `expires_at`                                     | bounded transfer, claim CAS and expiry              |
+| `error_code`, `correlation_id`                                               | safe diagnostics                                    |
+| timestamps                                                                   | lifecycle                                           |
 
-### 3.8 `import_job`
+### 3.9 `import_job`
 
 One attempt against a fixed source version and parser version.
 
-| Column                                                         | Notes                 |
-| -------------------------------------------------------------- | --------------------- |
-| `id`, `project_id`, `review_case_id`, `source_file_version_id` | scope                 |
-| `attempt_number`, `supersedes_import_job_id`                   | retry chain           |
-| `parser_name`, `parser_version`                                | reproducibility       |
-| `state`, `stage`, `progress_current`, `progress_total`         | truthful progress     |
-| `work_lease_token`, `lease_expires_at`                         | resumable chunk claim |
-| `started_at`, `completed_at`, `failed_at`                      | timing                |
-| `error_code`, `correlation_id`                                 | diagnostics           |
+| Column                                                                       | Notes                 |
+| ---------------------------------------------------------------------------- | --------------------- |
+| `id`, `project_id`, `review_case_id`, `package_id`, `source_file_version_id` | scope                 |
+| `attempt_number`, `supersedes_import_job_id`                                 | retry chain           |
+| `parser_name`, `parser_version`                                              | reproducibility       |
+| `state`, `stage`, `progress_current`, `progress_total`                       | truthful progress     |
+| `work_lease_token`, `lease_expires_at`                                       | resumable chunk claim |
+| `started_at`, `completed_at`, `failed_at`                                    | timing                |
+| `error_code`, `correlation_id`                                               | diagnostics           |
 
-### 3.9 `import_sheet`
+The table is present in the current migration and receives a
+`pending-parser/unselected` placeholder after byte storage. No semantic parser
+worker or continuation service is implemented yet.
+
+The remaining import, mapping, canonical dataset, review and reporting tables
+below are target contracts unless a migration is explicitly cited. They are not
+present in the current Phase 2A database.
+
+### 3.10 `import_sheet`
 
 | Column                                                             | Notes                              |
 | ------------------------------------------------------------------ | ---------------------------------- |
@@ -163,7 +197,7 @@ One attempt against a fixed source version and parser version.
 | `selected`                                                         | mapping decision                   |
 | `diagnostic_summary_json`                                          | bounded                            |
 
-### 3.10 `mapping_version`
+### 3.11 `mapping_version`
 
 Immutable after confirmation.
 
@@ -178,7 +212,7 @@ Immutable after confirmation.
 | `created_by`, `confirmed_by`, timestamps              | audit                           |
 | `version`                                             | draft optimistic concurrency    |
 
-### 3.11 `canonical_dataset`
+### 3.12 `canonical_dataset`
 
 | Column                                                          | Notes                             |
 | --------------------------------------------------------------- | --------------------------------- |
@@ -190,7 +224,7 @@ Immutable after confirmation.
 | `dataset_checksum`                                              | deterministic canonical checksum  |
 | timestamps                                                      | lifecycle                         |
 
-### 3.12 `canonical_row`
+### 3.13 `canonical_row`
 
 Core query fields should be relational columns; optional source extras may be bounded JSON.
 
@@ -215,7 +249,7 @@ Core query fields should be relational columns; optional source extras may be bo
 
 Do not store numeric zero for blank/invalid. Use null plus diagnostics.
 
-### 3.13 `import_diagnostic`
+### 3.14 `import_diagnostic`
 
 | Column                                                     | Notes                    |
 | ---------------------------------------------------------- | ------------------------ |
@@ -226,7 +260,7 @@ Do not store numeric zero for blank/invalid. Use null plus diagnostics.
 | `source_sheet_id`, `source_row_index`, `source_column_key` | optional location        |
 | `details_json`                                             | bounded safe values      |
 
-### 3.14 `adjustment`
+### 3.15 `adjustment`
 
 Append-only correction overlay.
 
@@ -241,7 +275,7 @@ Append-only correction overlay.
 
 Active adjustment uniqueness may be enforced for `(dataset_id, row_id, field_name)` through application transaction plus index strategy.
 
-### 3.15 `rule_profile_version`
+### 3.16 `rule_profile_version`
 
 System/admin-controlled immutable catalog.
 
@@ -252,7 +286,7 @@ System/admin-controlled immutable catalog.
 | `rule_manifest_json`                     | rule IDs/versions/defaults |
 | `created_at`, `activated_at`             | lifecycle                  |
 
-### 3.16 `rule_configuration`
+### 3.17 `rule_configuration`
 
 | Column                                   | Notes                                 |
 | ---------------------------------------- | ------------------------------------- |
@@ -263,7 +297,7 @@ System/admin-controlled immutable catalog.
 | `created_by`, `confirmed_by`, timestamps | audit                                 |
 | `version`                                | optimistic concurrency for draft      |
 
-### 3.17 `project_baseline`
+### 3.18 `project_baseline`
 
 | Column                               | Notes                                    |
 | ------------------------------------ | ---------------------------------------- |
@@ -274,7 +308,7 @@ System/admin-controlled immutable catalog.
 | `source`, `status`, `version`        | provenance                               |
 | `created_by`, timestamps             | audit                                    |
 
-### 3.18 `review_run`
+### 3.19 `review_run`
 
 Immutable after terminal finalization.
 
@@ -293,7 +327,7 @@ Immutable after terminal finalization.
 | started/completed/failed timestamps                | timing                                 |
 | `error_code`, `correlation_id`                     | diagnostics                            |
 
-### 3.19 `rule_result`
+### 3.20 `rule_result`
 
 | Column                              | Notes                                      |
 | ----------------------------------- | ------------------------------------------ |
@@ -308,7 +342,7 @@ Immutable after terminal finalization.
 
 Unique `(review_run_id, rule_id, rule_version, target_key)`.
 
-### 3.20 `finding`
+### 3.21 `finding`
 
 Finding content is immutable for a run; mutable projection fields are versioned.
 
@@ -326,7 +360,7 @@ Finding content is immutable for a run; mutable projection fields are versioned.
 
 Unique `(review_run_id, finding_key)`.
 
-### 3.21 `finding_evidence`
+### 3.22 `finding_evidence`
 
 | Column                                                        | Notes                                                     |
 | ------------------------------------------------------------- | --------------------------------------------------------- |
@@ -337,15 +371,15 @@ Unique `(review_run_id, finding_key)`.
 | `sort_order`                                                  | stable report order                                       |
 | `created_at`                                                  | immutable                                                 |
 
-### 3.22 `finding_state_event`
+### 3.23 `finding_state_event`
 
 Append-only transition log with `from_state`, `to_state`, reason, actor, timestamp, prior version, and metadata.
 
-### 3.23 `finding_comment`
+### 3.24 `finding_comment`
 
 Append-only comments. Support edit/delete only if policy requires it; retain revision/tombstone audit rather than silent replacement.
 
-### 3.24 `ai_assessment`
+### 3.25 `ai_assessment`
 
 | Column                                                     | Notes                                     |
 | ---------------------------------------------------------- | ----------------------------------------- |
@@ -356,7 +390,7 @@ Append-only comments. Support edit/delete only if policy requires it; retain rev
 | `validation_status`, `limitations_json`                    | trust boundary                            |
 | `created_at`                                               | immutable                                 |
 
-### 3.25 `report_version`
+### 3.26 `report_version`
 
 | Column                                                | Notes                             |
 | ----------------------------------------------------- | --------------------------------- |
@@ -366,11 +400,11 @@ Append-only comments. Support edit/delete only if policy requires it; retain rev
 | `snapshot_json`                                       | included counts/decision versions |
 | `generated_by`, `generated_at`, `superseded_at`       | audit                             |
 
-### 3.26 `report_approval`
+### 3.27 `report_approval`
 
 Append-only approval/rejection decisions with approver, decision, reason, report checksum, timestamp, and policy version.
 
-### 3.27 `audit_event`
+### 3.28 `audit_event`
 
 | Column                                       | Notes                                   |
 | -------------------------------------------- | --------------------------------------- |
@@ -410,10 +444,13 @@ Add indexes based on query evidence, not speculation. Test query plans with repr
 Generated server-side only:
 
 ```text
-projects/{projectOpaqueId}/sources/{sourceVersionOpaqueId}/original
+projects/{projectOpaqueId}/cases/{caseOpaqueId}/sources/{sourceVersionOpaqueId}/files/{fileOpaqueId}.{extension}
 projects/{projectOpaqueId}/reports/{reportVersionOpaqueId}/{format}
-projects/{projectOpaqueId}/temporary/{uploadAttemptOpaqueId}
 ```
+
+The source key above is implemented by ADR-004. A temporary-object namespace is
+not implemented; do not document or depend on one until reconciliation owns its
+lifecycle.
 
 Do not include original filenames, client names, project codes, emails, or secrets in keys.
 
@@ -442,6 +479,16 @@ Never run broad recursive deletion with an unresolved project/object prefix.
 
 ## 8. Data-quality invariants
 
+- `source_package`, `source_file`, `source_file_version` and `upload_attempt`
+  must share the same project and review-case scope through composite keys.
+- A package cannot become `stored_unverified` while any current source version
+  is not `stored`.
+- A stored source version must have detected type, checksum, validation snapshot
+  and stored timestamp; no caller may mark a metadata-only source ready.
+- Project identity conflict blocks the whole package. Partial promotion is
+  forbidden.
+- Masonry source bytes remain in lineage and are excluded only from the later
+  canonical/review calculation with an explicit reason.
 - `canonical_row.dataset_id` must match the same project/case.
 - `review_run.dataset_id`, profile and configuration cannot change after creation.
 - Completed/failed/cancelled runs reject result mutation except an approved repair migration.
@@ -454,9 +501,13 @@ Never run broad recursive deletion with an unresolved project/object prefix.
 
 ## 9. Migration/test requirements
 
+- Current canonical sequence: `0001_initial.sql`, `0002_ingestion.sql`,
+  `0003_ingestion_case_idempotency.sql`.
 - Apply every migration to an empty database.
 - Apply upgrades from the previous release fixture.
 - Verify foreign keys, uniqueness, state constraints, and indexes.
 - Test D1 transaction behavior used by each command.
 - Seed only synthetic aliases/rule manifests.
 - Capture schema dump and migration log in release evidence.
+- Verify cross-project composite foreign keys, the stored-source invariant and
+  project/case/actor-scoped idempotency on clean and upgraded databases.

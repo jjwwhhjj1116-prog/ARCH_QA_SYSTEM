@@ -14,13 +14,20 @@
 - D1 프로젝트·멤버십·검수 케이스·감사 이벤트 스키마
 - 멤버십 기반 프로젝트/케이스 접근 제어
 - 요청 크기·콘텐츠 유형·동일 사이트 mutation 경계
-- 단일 바이트 스냅샷에서 해시·크기를 계산하는 비공개 R2 저장 포트
+- 산출서와 집계표 묶음 생성, XLSX/CSV 다중 선택과 파일별 업로드 상태
+- 단일 바이트 스냅샷에서 크기·SHA-256·선언 형식을 검증하는 비공개 R2 저장
+- XLSX ZIP 구조·CRC·압축 해제 한도·경로·중복 엔트리·매크로·ActiveX·임베딩 차단
+- CSV UTF-8·NUL·ZIP 위장·빈 파일 차단
+- 프로젝트·검수 케이스·파일 버전을 결속한 D1 계보와 케이스 범위 멱등성
 - unit/API/migration/E2E/accessibility/security 자동 검증
 
 아직 구현되지 않은 핵심 범위:
 
-- 산출서와 집계표 업로드 및 파일 안전 검사
-- XLSX/CSV 시트 탐색, 컬럼 매핑, 정규화와 계보
+- XLSX 시트 목록·차원·병합셀·수식·헤더 후보·제한된 셀 미리보기
+- CSV 구분자·인코딩 자동 판별과 사용자 재지정
+- 컬럼 매핑, 정규화, canonical dataset/row와 import diagnostics
+- 프로젝트 코드 추출과 파일 묶음 identity 일치·충돌 판정
+- R2 저장 성공/D1 완료 실패 복구, 만료·중단 업로드 정리와 상태 조회
 - 조적 전면 제외와 부위 하드룰을 포함한 FIN 결정론 검수
 - RC 규칙, Finding/Evidence, 조정·재실행
 - 보고서·승인·감사 관리
@@ -49,7 +56,7 @@ npm run check:full
 
 이 명령은 lint, format, TypeScript, unit/API test, production build, coverage, D1 migration 재현, Playwright 4개 viewport, axe와 production dependency audit를 실행합니다.
 
-현재 검증 결과는 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)와 [acceptance matrix](artifacts/qa/phase-1/acceptance-matrix.md)에 있습니다.
+확정 기준선은 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)와 [acceptance matrix](artifacts/qa/phase-1/acceptance-matrix.md)에 있습니다. 현재 Phase 2A 업로드 변경은 전체 게이트와 별도 증적을 통과한 뒤 `artifacts/qa/phase-2/`에 기록합니다.
 
 ## 주요 구현 경로
 
@@ -57,10 +64,13 @@ npm run check:full
 | ----------------------------- | ------------------------------------------ |
 | `app/review-studio.tsx`       | 프로젝트·검수 케이스 워크벤치              |
 | `app/api/projects/`           | 프로젝트와 케이스 HTTP API                 |
+| `app/api/uploads/`            | 권한 재검사·제한된 바이트 업로드 API       |
 | `lib/auth/`                   | 요청 actor 해석과 production fail-closed   |
 | `lib/http/`                   | 공통 요청 경계와 오류 envelope             |
 | `lib/projects/`, `lib/cases/` | application service와 repository           |
 | `lib/files/`                  | private R2 저장 포트와 무결성 계약         |
+| `lib/ingestion/`              | source package·업로드 상태·D1 계보         |
+| `lib/imports/`                | XLSX/CSV 구조 안전 검사(의미 파서 아님)    |
 | `db/`, `drizzle/`             | D1 schema와 canonical migration            |
 | `tests/e2e/`                  | 반응형·접근성·권한 브라우저 흐름           |
 | `docs/`                       | 전체 PRD, 아키텍처, 검수 엔진 및 보안 계약 |

@@ -45,6 +45,12 @@ export function can(role: ProjectRole, action: ProjectAction): boolean {
   return grants[role].has(action);
 }
 
+export function rolesForAction(action: ProjectAction): ProjectRole[] {
+  return (Object.keys(grants) as ProjectRole[]).filter((role) =>
+    grants[role].has(action),
+  );
+}
+
 export function canApproveReport(input: {
   role: ProjectRole;
   actorId: string;

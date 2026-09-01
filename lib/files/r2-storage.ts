@@ -5,6 +5,7 @@ import {
   type SourceFileLocator,
   type StoredSourceFile,
   type StoredSourceMetadata,
+  SourceFileConflictError,
   sourceFileLocatorSchema,
   sourceObjectKey,
 } from './storage';
@@ -46,7 +47,26 @@ export class PrivateR2FileStorage implements PrivateFileStorage {
       },
     });
     if (!stored) {
-      throw new Error('같은 계보의 원본 파일은 덮어쓸 수 없습니다.');
+      const existing = await this.bucket.head(sourceObjectKey(locator));
+      const metadata = existing?.customMetadata ?? {};
+      const metadataSize = parseStoredSize(metadata.size);
+      const scopeMatches =
+        metadata.projectId === locator.projectId &&
+        metadata.caseId === locator.caseId &&
+        metadata.sourceVersionId === locator.sourceVersionId &&
+        metadata.fileId === locator.fileId;
+      if (
+        existing &&
+        scopeMatches &&
+        metadata.sha256 === sha256 &&
+        metadataSize === size &&
+        existing.size === size
+      ) {
+        return { sha256, size };
+      }
+      throw new SourceFileConflictError(
+        '같은 계보의 원본 파일은 다른 바이트로 덮어쓸 수 없습니다.',
+      );
     }
     return { sha256, size };
   }
@@ -69,14 +89,29 @@ export class PrivateR2FileStorage implements PrivateFileStorage {
         throw new Error('저장 파일의 프로젝트 계보가 일치하지 않습니다.');
       }
     }
+    const metadataSize = parseStoredSize(metadata.size);
+    if (metadataSize !== object.size) {
+      throw new Error('저장 파일의 크기 메타데이터가 올바르지 않습니다.');
+    }
     return {
       body: object.body,
       contentType:
         object.httpMetadata?.contentType ?? 'application/octet-stream',
       sha256: sha256Schema.parse(metadata.sha256),
-      size: Number.parseInt(metadata.size ?? '', 10),
+      size: object.size,
     };
   }
+}
+
+function parseStoredSize(value: string | undefined): number {
+  if (!value || !/^\d+$/u.test(value)) {
+    throw new Error('저장 파일의 크기 메타데이터가 올바르지 않습니다.');
+  }
+  const size = Number(value);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error('저장 파일의 크기 메타데이터가 올바르지 않습니다.');
+  }
+  return size;
 }
 
 function sourceSnapshot(

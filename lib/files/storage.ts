@@ -32,6 +32,10 @@ export interface PrivateFileStorage {
   getSourceFile(locator: SourceFileLocator): Promise<StoredSourceFile | null>;
 }
 
+export class SourceFileConflictError extends Error {
+  readonly code = 'SOURCE_FILE_CONFLICT';
+}
+
 export function sourceObjectKey(input: SourceFileLocator): string {
   const locator = sourceFileLocatorSchema.parse(input);
   return [

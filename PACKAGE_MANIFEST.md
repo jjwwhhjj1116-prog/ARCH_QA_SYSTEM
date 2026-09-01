@@ -68,14 +68,17 @@ The repository now contains a tested local vertical slice in addition to the ori
 
 | Path                             | Implemented responsibility                            |
 | -------------------------------- | ----------------------------------------------------- |
-| `app/review-studio.tsx`          | Korean responsive project and review-case workbench   |
-| `app/api/projects/`              | project and project-scoped case APIs                  |
+| `app/review-studio.tsx`          | Korean workbench with source-package upload workflow  |
+| `app/api/projects/`              | project, case and source-package intent APIs          |
+| `app/api/uploads/`               | authorized bounded source-byte transfer               |
 | `lib/auth/`, `lib/http/`         | actor and request security boundaries                 |
 | `lib/projects/`, `lib/cases/`    | services and D1 repositories                          |
 | `lib/files/`                     | private R2 storage contract and integrity adapter     |
-| `db/`, `drizzle/`                | schema and canonical migration                        |
+| `lib/ingestion/`                 | package/file/version/upload lifecycle and D1 adapter  |
+| `lib/imports/`                   | structural XLSX/CSV preflight, not semantic parsing   |
+| `db/`, `drizzle/0001..0003`      | schema, ingestion lineage and scoped idempotency      |
 | `tests/e2e/`                     | browser, responsive, accessibility and isolation flow |
 | `artifacts/qa/phase-1/`          | reproducible local evidence and NO-GO limitations     |
 | `package.json`, `vite.config.ts` | build and full verification commands                  |
 
-Cloudflare provisioning and deployment remain intentionally deferred. The implemented slice does not yet include workbook ingestion or the FIN/RC review engine.
+Cloudflare provisioning and deployment remain intentionally deferred. The local slice includes source-package intent, bounded byte upload, structural XLSX/CSV preflight and private source storage. It does not yet include semantic workbook inspection, mapping, canonical normalization or the FIN/RC review engine.

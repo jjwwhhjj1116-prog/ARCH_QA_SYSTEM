@@ -4,14 +4,16 @@ This document defines transport-independent contracts. Implement them as HTTP JS
 
 ## 1. Conventions
 
-- Base namespace: `/api/v1` if HTTP routes are used.
+- Current local namespace: `/api`. Introduce a versioned namespace before a
+  public compatibility commitment; do not pretend `/api/v1` exists today.
 - JSON uses camelCase; database uses snake_case.
 - IDs are opaque strings.
 - Timestamps are UTC ISO-8601.
 - Decimal quantities are canonical strings, never JSON floating-point truth.
 - Null means absent/unknown and remains distinct from numeric zero.
 - Protected operations derive the actor from verified server identity.
-- Every response exposes a safe correlation ID.
+- Every current response exposes a safe top-level `requestId` and
+  `x-request-id`; do not expose internal storage identifiers.
 - List endpoints use cursor pagination with a bounded limit.
 - Mutable commands require aggregate `version`/`If-Match`.
 - Costly create/finalize actions accept an idempotency key.
@@ -23,7 +25,7 @@ Success:
 ```json
 {
   "data": {},
-  "meta": { "correlationId": "cor_..." }
+  "requestId": "req_..."
 }
 ```
 
@@ -33,7 +35,7 @@ List:
 {
   "data": [],
   "page": { "nextCursor": "opaque-or-null", "limit": 50 },
-  "meta": { "correlationId": "cor_..." }
+  "requestId": "req_..."
 }
 ```
 
@@ -44,8 +46,8 @@ Error:
   "error": {
     "code": "VALIDATION_FAILED",
     "message": "입력값을 확인해 주세요.",
-    "correlationId": "cor_...",
-    "fieldIssues": [
+    "requestId": "req_...",
+    "details": [
       {
         "field": "mapping.fields.unit",
         "code": "REQUIRED",
@@ -125,38 +127,70 @@ Profile kind becomes immutable after source/review history according to policy.
 
 ## 7. Upload protocol
 
-Exact byte transfer follows the verified Sites-supported path. Preserve these logical steps.
+The current local Phase 2A boundary follows ADR-004. Metadata intent and one
+authorized byte snapshot are separate requests; byte inspection, private R2
+write and D1 completion occur inside the same bounded PUT operation.
 
-### Create upload intent
+### Create source-package intents
 
-`POST /projects/{projectId}/cases/{caseId}/uploads`
+`POST /api/projects/{projectId}/cases/{caseId}/source-packages`
 
-Idempotency key required. Request includes sanitized display metadata only:
+`Idempotency-Key` is required and scoped by project, case and actor. A package
+contains 1..32 declarations:
 
 ```json
 {
-  "filename": "FIN_quantity_v2.xlsx",
-  "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "sizeBytes": 824110,
-  "purpose": "quantity_source"
+  "displayName": "1차 산출서와 집계표",
+  "files": [
+    {
+      "filename": "내부산출서.xlsx",
+      "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "sizeBytes": 824110,
+      "purpose": "quantity_source"
+    }
+  ]
 }
 ```
 
-Response returns an opaque upload ID and supported transfer instructions, never a permanent public object URL.
+The response returns package state, project-identity state and per-file opaque
+upload/source IDs. It never returns an R2 key, object URL, client checksum or
+server filesystem path. Reusing a key with the same canonical request returns
+the existing package and its actual current states; a different request is 409.
 
-### Finalize upload
+### Store and complete one source file
 
-`POST /uploads/{uploadId}/finalize`
+`PUT /api/uploads/{uploadId}/bytes`
 
-- authorized against the project;
-- idempotent;
-- validates stored bytes, checksum and signature;
-- transitions D1 state;
-- returns source version and validation summary.
+`Content-Type: application/octet-stream`
+
+- reauthorizes active membership and `source:upload` against the package scope;
+- bounds the stream by the declared size and the 20 MiB source limit;
+- inspects one immutable snapshot, derives SHA-256 and writes the same bytes;
+- rejects extension/type/signature/CRC/ZIP path/expansion/active-content errors;
+- finalizes D1 only after the exact private R2 write succeeds;
+- returns safe stored/package states, checksum, size and warning codes;
+- accepts an identical-byte retry and rejects different bytes at the immutable key.
+
+There is intentionally no separate public finalize endpoint in this slice. A
+failed or stale claim can be retried, but automatic R2/D1 reconciliation and
+expired-object cleanup remain mandatory before Gate 2.
 
 ### Abort/retry
 
-Only valid pending states. Retry creates a linked attempt rather than overwriting history.
+Explicit abort, status and cleanup endpoints are not implemented. Current retry
+reuses the same upload attempt after a recorded failure, or reclaims an
+`uploading` claim older than five minutes. A later reconciliation design must
+preserve history and use exact scoped keys.
+
+### Current Phase 2A limitations
+
+- `stored_unverified` is not mapping or review readiness.
+- XLSX preflight validates ZIP/XML structure and prohibited content, not sheets,
+  cells, formulas, merged ranges or header semantics.
+- CSV currently requires UTF-8 and does not yet expose delimiter/encoding
+  override.
+- Project identity is pending; checksum duplicate decision UI is absent.
+- No mapping, canonical dataset or deterministic FIN/RC review output exists.
 
 ## 8. Import inspection and mapping
 
@@ -367,3 +401,10 @@ Protected or minimally revealing output includes:
 - decimal string round-trip;
 - bounded payload size;
 - file/report download headers and authorization.
+- wrong actor/project/case/upload identifier and permission revocation;
+- declared/actual size and type/signature mismatch;
+- ZIP traversal, duplicate paths, ZIP64, encryption, invalid deflate/CRC/XML,
+  undeclared expansion, macro/ActiveX/OLE relationship and archive limits;
+- immutable R2 same-byte retry and different-byte conflict;
+- R2 success/D1 completion failure, failed-state retry and stale claim recovery;
+- multi-file partial failure and package idempotency across different cases.

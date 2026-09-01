@@ -6,6 +6,9 @@ export default defineConfig({
   globalTeardown: './tests/e2e/global-teardown.ts',
   timeout: 30_000,
   fullyParallel: false,
+  // All viewport projects share one local D1/SQLite state. Serial workers keep
+  // authorization-role mutation and upload-state assertions deterministic.
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://localhost:3217',

@@ -15,7 +15,7 @@ Completion requires code, tests, acceptance evidence and updated docs—not impl
 | P0-005 | Verify D1/R2 binding names and local/test strategy                  | platform_architect                     | P0-003               | PLAT-003                | IN_PROGRESS |
 | P0-006 | Verify identity/access/sign-in mechanism                            | platform_architect + security_reviewer | P0-004               | AUTH-001/002            | BLOCKED     |
 | P0-007 | Verify upload/request/build/storage constraints                     | platform_architect                     | P0-004               | decision log            | DONE        |
-| P0-008 | Decide parser library and restricted formula scope                  | main                                   | P0-002/P0-007        | ADR-002                 | DONE        |
+| P0-008 | Decide parser library and restricted formula scope                  | main                                   | P0-002/P0-007        | parser ADR              | IN_PROGRESS |
 | P0-009 | Decide decimal representation and unit table                        | main + review_engine consult           | P0-002               | ADR-003                 | DONE        |
 | P0-010 | Freeze canonical row/value/lineage schema                           | main                                   | P0-008/P0-009        | NORM contracts          | DONE        |
 | P0-011 | Freeze rule/result/finding/evidence/run contracts                   | main                                   | P0-010               | RUN/RULE/FIND contracts | DONE        |
@@ -49,26 +49,26 @@ Completion requires code, tests, acceptance evidence and updated docs—not impl
 
 ## Phase 2 — Ingestion
 
-| ID     | Task                                                         | Owner                                     | Depends              | Acceptance / output | Status |
-| ------ | ------------------------------------------------------------ | ----------------------------------------- | -------------------- | ------------------- | ------ |
-| P2-001 | Add source/upload/import/dataset migrations                  | data_platform                             | P1-015               | data model          | TODO   |
-| P2-002 | Implement upload intent/finalize/idempotency                 | data_platform                             | P2-001/P1-008        | FILE-001/007        | TODO   |
-| P2-003 | Implement signature/type/filename/size guards                | data_platform                             | P0-008/P2-002        | FILE-002/003        | TODO   |
-| P2-004 | Implement archive/sheet/row/column/cell safety limits        | data_platform                             | P2-003               | FILE-003/004        | TODO   |
-| P2-005 | Implement XLSX safe inspection                               | data_platform                             | P2-004               | IMP-001/003         | TODO   |
-| P2-006 | Implement CSV encoding/delimiter inspection                  | data_platform                             | P2-003               | IMP-002             | TODO   |
-| P2-007 | Implement mapping draft/proposal/confirm versions            | data_platform                             | P0-010/P2-005/P2-006 | MAP-001..003        | TODO   |
-| P2-008 | Implement decimal/unit/text/floor normalization              | review_engine or assigned import owner    | P0-009/P0-010        | NORM-001..005       | TODO   |
-| P2-009 | Implement canonical dataset persistence/checksum/diagnostics | data_platform                             | P2-007/P2-008        | NORM-006..008       | TODO   |
-| P2-010 | Implement resumable import state/lease if required           | data_platform                             | P0-014/P2-009        | failure recovery    | TODO   |
-| P2-011 | Create synthetic structure/semantic/security fixtures        | qa owner or assigned implementation owner | P0-017/P2-003        | fixture catalog     | TODO   |
-| P2-012 | Build upload and validation UI                               | frontend_ui                               | P2-002/P2-003 API    | FILE-009            | TODO   |
-| P2-013 | Build sheet inventory/preview UI                             | frontend_ui                               | P2-005/P2-006 API    | IMP UI              | TODO   |
-| P2-014 | Build mapping/unit/floor/exclusion UI                        | frontend_ui                               | P2-007 API           | MAP-004             | TODO   |
-| P2-015 | Build data-quality/diagnostic/skipped-rule UI                | frontend_ui                               | P2-009 API           | NORM-006/007        | TODO   |
-| P2-016 | Add refresh/retry/conflict/browser ingestion tests           | frontend_ui + data_platform owned tests   | P2-012..015          | E2E                 | TODO   |
-| P2-017 | Hostile upload/security/performance audit                    | security_reviewer + qa_auditor            | P2-001..016          | Gate 2              | TODO   |
-| P2-018 | Main integration and Gate 2 evidence                         | main                                      | P2-017               | Gate 2 complete     | TODO   |
+| ID     | Task                                                         | Owner                                     | Depends              | Acceptance / output | Status      |
+| ------ | ------------------------------------------------------------ | ----------------------------------------- | -------------------- | ------------------- | ----------- |
+| P2-001 | Add source/upload/import/dataset migrations                  | data_platform                             | P1-015               | data model          | IN_PROGRESS |
+| P2-002 | Implement upload intent/finalize/idempotency                 | data_platform                             | P2-001/P1-008        | FILE-001/007        | IN_PROGRESS |
+| P2-003 | Implement signature/type/filename/size guards                | data_platform                             | P0-008/P2-002        | FILE-002/003        | IN_PROGRESS |
+| P2-004 | Implement archive/sheet/row/column/cell safety limits        | data_platform                             | P2-003               | FILE-003/004        | IN_PROGRESS |
+| P2-005 | Implement XLSX safe inspection                               | data_platform                             | P2-004               | IMP-001/003         | TODO        |
+| P2-006 | Implement CSV encoding/delimiter inspection                  | data_platform                             | P2-003               | IMP-002             | TODO        |
+| P2-007 | Implement mapping draft/proposal/confirm versions            | data_platform                             | P0-010/P2-005/P2-006 | MAP-001..003        | TODO        |
+| P2-008 | Implement decimal/unit/text/floor normalization              | review_engine or assigned import owner    | P0-009/P0-010        | NORM-001..005       | TODO        |
+| P2-009 | Implement canonical dataset persistence/checksum/diagnostics | data_platform                             | P2-007/P2-008        | NORM-006..008       | TODO        |
+| P2-010 | Implement resumable import state/lease if required           | data_platform                             | P0-014/P2-009        | failure recovery    | TODO        |
+| P2-011 | Create synthetic structure/semantic/security fixtures        | qa owner or assigned implementation owner | P0-017/P2-003        | fixture catalog     | IN_PROGRESS |
+| P2-012 | Build upload and validation UI                               | frontend_ui                               | P2-002/P2-003 API    | FILE-009            | IN_PROGRESS |
+| P2-013 | Build sheet inventory/preview UI                             | frontend_ui                               | P2-005/P2-006 API    | IMP UI              | TODO        |
+| P2-014 | Build mapping/unit/floor/exclusion UI                        | frontend_ui                               | P2-007 API           | MAP-004             | TODO        |
+| P2-015 | Build data-quality/diagnostic/skipped-rule UI                | frontend_ui                               | P2-009 API           | NORM-006/007        | TODO        |
+| P2-016 | Add refresh/retry/conflict/browser ingestion tests           | frontend_ui + data_platform owned tests   | P2-012..015          | E2E                 | IN_PROGRESS |
+| P2-017 | Hostile upload/security/performance audit                    | security_reviewer + qa_auditor            | P2-001..016          | Gate 2              | TODO        |
+| P2-018 | Main integration and Gate 2 evidence                         | main                                      | P2-017               | Gate 2 complete     | TODO        |
 
 ## Phase 3 — Deterministic FIN MVP
 
@@ -191,3 +191,6 @@ ThreeUI and AI are not on the critical path.
 - P1-005, P1-009, P1-010 and P1-013 are complete for the project/review-case slice, not for ingestion or the review engine.
 - P1-012 still needs the complete production role matrix even though project-scoped case denial is covered locally.
 - The Phase 1 product gate remains **NO-GO**. Development now proceeds locally into Phase 2 ingestion and Phase 3 deterministic review without waiting for Cloudflare provisioning.
+- Phase 2A now has additive ingestion migrations, package-intent API, bounded byte upload, structural XLSX/CSV preflight, exact private R2 storage and a basic multi-file upload UI.
+- The current byte request performs authorized storage and D1 completion against one inspected snapshot. Orphan reconciliation, expired cleanup, status refresh, semantic workbook inspection, project identity verification, mapping and canonical normalization remain incomplete.
+- The Phase 2 gate remains **NO-GO** until those missing boundaries and Phase 2 evidence are completed; P2-001..004, P2-012 and P2-016 therefore remain `IN_PROGRESS`.

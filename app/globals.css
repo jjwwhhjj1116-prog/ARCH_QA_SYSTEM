@@ -911,11 +911,20 @@ body {
 }
 .case-list button {
   min-height: 32px;
-  border: 1px solid #c3cad2;
-  background: #eef1f3;
-  color: #8a949e;
+  border: 1px solid #87929e;
+  background: #fff;
+  color: #34414d;
   font-size: 9px;
   font-weight: 800;
+}
+.case-list button:hover:not(:disabled) {
+  border-color: #bd460f;
+  color: #a33c0a;
+}
+.case-list button:disabled {
+  border-color: #c3cad2;
+  background: #eef1f3;
+  color: #626d78;
 }
 .case-discipline {
   display: grid;
@@ -951,6 +960,106 @@ body {
   color: #8e2c1d;
   font-size: 10px;
   font-weight: 900;
+}
+.source-upload-panel {
+  margin-top: 16px;
+  border: 1px solid #7f8b97;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(17 24 32 / 9%);
+}
+.source-upload-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #d5dbe1;
+}
+.source-upload-heading h4 {
+  margin: 0;
+  color: #1d2731;
+  font-size: 16px;
+}
+.source-upload-heading p {
+  margin: 6px 0 0;
+  color: #64717e;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.source-file-picker {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 20px 12px;
+  padding: 16px;
+  border: 1px dashed #87939f;
+  background: #f5f8fa;
+  color: #26323d;
+  cursor: pointer;
+}
+.source-file-picker:hover {
+  border-color: #bd460f;
+  background: #fff8f4;
+}
+.source-file-picker > svg {
+  width: 28px;
+  height: 28px;
+  color: #bd460f;
+}
+.source-file-picker > span {
+  display: grid;
+  gap: 3px;
+}
+.source-file-picker strong {
+  font-size: 12px;
+}
+.source-file-picker small {
+  color: #5d6874;
+  font-size: 10px;
+}
+.source-file-picker input {
+  max-width: 270px;
+  color: #3b4652;
+  font-size: 10px;
+}
+.source-file-list {
+  display: grid;
+  gap: 6px;
+  margin: 0 20px 12px;
+  padding: 0;
+  list-style: none;
+}
+.source-file-list li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #d7dce2;
+  background: #fafbfc;
+  color: #35414c;
+  font-size: 10px;
+}
+.source-file-list svg {
+  width: 16px;
+  height: 16px;
+  color: #4d687d;
+}
+.source-file-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-file-list small {
+  color: #5c6874;
+}
+.source-upload-progress {
+  display: block;
+  min-height: 22px;
+  margin: 0 20px 12px;
+  color: #47535f;
+  font-size: 10px;
 }
 .readiness-strip {
   display: grid;
@@ -1154,6 +1263,18 @@ body {
   }
   .case-list button {
     grid-column: 1 / -1;
+  }
+  .source-file-picker {
+    grid-template-columns: 30px minmax(0, 1fr);
+    margin-inline: 14px;
+  }
+  .source-file-picker input {
+    grid-column: 1 / -1;
+    max-width: 100%;
+  }
+  .source-file-list,
+  .source-upload-progress {
+    margin-inline: 14px;
   }
 }
 

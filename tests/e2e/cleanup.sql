@@ -1,5 +1,11 @@
 PRAGMA foreign_keys = ON;
+DELETE FROM import_job WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
+DELETE FROM upload_attempt WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
+DELETE FROM source_file_version WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
+DELETE FROM source_file WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
+DELETE FROM source_package WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
 DELETE FROM audit_event WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
 DELETE FROM review_case WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
 DELETE FROM project_member WHERE project_id IN (SELECT id FROM project WHERE code LIKE 'E2E%');
 DELETE FROM project WHERE code LIKE 'E2E%';
+DELETE FROM user_profile WHERE id = 'other-package-creator';

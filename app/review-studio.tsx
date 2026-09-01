@@ -14,6 +14,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Upload,
   X,
 } from 'lucide-react';
 import {
@@ -30,6 +31,8 @@ import type {
   ProjectSummary,
   ReviewCaseSummary,
 } from '@/lib/domain/contracts';
+import { canonicalSourceFilename } from '@/lib/imports/source-filename';
+import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 
 const workflow = [
   ['자료 등록', '산출서와 집계표'],
@@ -68,6 +71,11 @@ export function ReviewStudio() {
   const [caseState, setCaseState] = useState<LoadState>('ready');
   const [caseSubmitting, setCaseSubmitting] = useState(false);
   const [caseReloadToken, setCaseReloadToken] = useState(0);
+  const [uploadCaseId, setUploadCaseId] = useState<string | null>(null);
+  const [sourceFiles, setSourceFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const uploadKeyRef = useRef<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const primarySidebarRef = useRef<HTMLElement>(null);
@@ -76,6 +84,10 @@ export function ReviewStudio() {
   const selectProject = useCallback((projectId: string) => {
     selectedProjectIdRef.current = projectId;
     setSelectedProjectId(projectId);
+    setUploadCaseId(null);
+    setSourceFiles([]);
+    setUploadProgress('');
+    uploadKeyRef.current = null;
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -159,6 +171,10 @@ export function ReviewStudio() {
 
   const selectedProject =
     projects.find((project) => project.id === selectedProjectId) ?? null;
+  const canUpload =
+    selectedProject?.role === 'workspace_admin' ||
+    selectedProject?.role === 'project_owner' ||
+    selectedProject?.role === 'reviewer';
 
   useEffect(() => {
     if (!selectedProjectId) return;
@@ -253,6 +269,142 @@ export function ReviewStudio() {
       }
     } finally {
       setCaseSubmitting(false);
+    }
+  }
+
+  function openSourceUpload(reviewCaseId: string) {
+    uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
+    setUploadCaseId(reviewCaseId);
+    setSourceFiles([]);
+    setUploadProgress('등록할 산출서와 집계표를 선택하세요.');
+  }
+
+  function closeSourceUpload() {
+    if (uploading) return;
+    uploadKeyRef.current = null;
+    setUploadCaseId(null);
+    setSourceFiles([]);
+    setUploadProgress('');
+  }
+
+  async function uploadSources(
+    event: SyntheticEvent<HTMLFormElement, SubmitEvent>,
+  ) {
+    event.preventDefault();
+    if (!selectedProject || !uploadCaseId || sourceFiles.length === 0) return;
+    let canonicalFiles: Array<{ file: File; name: string }>;
+    try {
+      canonicalFiles = sourceFiles.map((file) => ({
+        file,
+        name: canonicalSourceFilename(file.name),
+      }));
+    } catch {
+      setMessageTone('error');
+      setMessage('파일명에 경로·제어문자 또는 허용되지 않는 문자가 있습니다.');
+      return;
+    }
+    const duplicateNames = canonicalFiles
+      .map(({ name }) => name.toLocaleLowerCase())
+      .filter((name, index, names) => names.indexOf(name) !== index);
+    if (duplicateNames.length > 0) {
+      setMessageTone('error');
+      setMessage('같은 파일명이 두 번 선택되었습니다. 파일명을 구분해 주세요.');
+      return;
+    }
+    const idempotencyKey =
+      uploadKeyRef.current ?? `source-package-${crypto.randomUUID()}`;
+    uploadKeyRef.current = idempotencyKey;
+    setUploading(true);
+    try {
+      setUploadProgress('파일 등록 공간과 감사 계보를 준비하는 중…');
+      const packageResponse = await fetch(
+        `/api/projects/${selectedProject.id}/cases/${uploadCaseId}/source-packages`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            displayName: `${selectedProject.name} 산출서와 집계표`,
+            files: sourceFiles.map((file) => ({
+              filename: file.name,
+              contentType: declaredContentType(file),
+              sizeBytes: file.size,
+              purpose: 'quantity_source',
+            })),
+          }),
+        },
+      );
+      const packageBody = (await packageResponse.json()) as
+        | ApiSuccessEnvelope<SourcePackageSummary>
+        | ApiErrorEnvelope;
+      if (!packageResponse.ok || 'error' in packageBody) {
+        throw new Error(
+          'error' in packageBody
+            ? packageBody.error.message
+            : '자료 등록 공간을 만들지 못했습니다.',
+        );
+      }
+      const filesByKey = new Map<string, File>(
+        canonicalFiles.map(
+          ({ file, name }) => [`${name}\u0000${file.size}`, file] as const,
+        ),
+      );
+      let completed = packageBody.data.files.filter(
+        (file) => file.status === 'stored',
+      ).length;
+      for (const intent of packageBody.data.files) {
+        if (intent.status === 'stored') continue;
+        const file = filesByKey.get(
+          `${intent.filename}\u0000${intent.sizeBytes}`,
+        );
+        if (!file) {
+          throw new Error(`${intent.filename} 원본 파일을 다시 선택해 주세요.`);
+        }
+        setUploadProgress(
+          `${intent.filename} 검사·저장 중 (${completed + 1}/${sourceFiles.length})`,
+        );
+        const response = await fetch(`/api/uploads/${intent.uploadId}/bytes`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/octet-stream' },
+          body: file,
+        });
+        const body = (await response.json()) as
+          | ApiSuccessEnvelope<unknown>
+          | ApiErrorEnvelope;
+        if (!response.ok || 'error' in body) {
+          throw new Error(
+            'error' in body
+              ? body.error.message
+              : `${intent.filename} 파일을 저장하지 못했습니다.`,
+          );
+        }
+        completed += 1;
+      }
+      setUploadProgress(`${completed}개 파일의 원본·해시·계보를 저장했습니다.`);
+      setMessageTone('success');
+      setMessage(
+        `${completed}개 산출서와 집계표를 저장했습니다. 프로젝트 식별은 아직 미확정입니다.`,
+      );
+      uploadKeyRef.current = null;
+      window.setTimeout(() => {
+        setUploadCaseId(null);
+        setSourceFiles([]);
+        setUploadProgress('');
+      }, 800);
+    } catch (error) {
+      setMessageTone('error');
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : '산출서와 집계표를 저장하지 못했습니다.',
+      );
+      setUploadProgress(
+        '중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.',
+      );
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -669,14 +821,21 @@ export function ReviewStudio() {
                     </span>
                   </li>
                   <li>
-                    <Database aria-hidden="true" />
+                    <Check aria-hidden="true" />
                     <span>
-                      <strong>원본 저장소 연결</strong>
-                      <small>Cloudflare R2 연결 승인 대기</small>
+                      <strong>로컬 비공개 저장</strong>
+                      <small>해시·형식·압축 구조 검사 활성</small>
                     </span>
                   </li>
                 </ol>
-                <button className="secondary-action" type="button" disabled>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={!canUpload || reviewCases.length === 0}
+                  onClick={() =>
+                    reviewCases[0] && openSourceUpload(reviewCases[0].id)
+                  }
+                >
                   산출서와 집계표 등록 시작
                 </button>
                 <div className="case-workbench">
@@ -737,12 +896,95 @@ export function ReviewStudio() {
                             <strong>{reviewCase.name}</strong>
                             <small>{caseStatusLabel(reviewCase.status)}</small>
                           </span>
-                          <button type="button" disabled>
-                            자료 등록 준비 중
+                          <button
+                            type="button"
+                            disabled={!canUpload || uploading}
+                            onClick={() => openSourceUpload(reviewCase.id)}
+                          >
+                            산출서와 집계표 등록
                           </button>
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {uploadCaseId && (
+                    <form
+                      className="source-upload-panel"
+                      onSubmit={(event) => void uploadSources(event)}
+                    >
+                      <div className="source-upload-heading">
+                        <div>
+                          <span className="selection-label">자료 등록</span>
+                          <h4>산출서와 집계표 원본 등록</h4>
+                          <p>
+                            XLSX·CSV만 허용합니다. 파일은 수정하지 않고 원본
+                            해시와 검증 근거를 별도로 저장합니다.
+                          </p>
+                        </div>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label="자료 등록 닫기"
+                          disabled={uploading}
+                          onClick={closeSourceUpload}
+                        >
+                          <X aria-hidden="true" />
+                        </button>
+                      </div>
+                      <label className="source-file-picker">
+                        <Upload aria-hidden="true" />
+                        <span>
+                          <strong>파일 선택</strong>
+                          <small>
+                            산출서와 집계표를 함께 선택하세요 · 파일당 최대 20MB
+                          </small>
+                        </span>
+                        <input
+                          type="file"
+                          accept=".xlsx,.csv"
+                          multiple
+                          required
+                          disabled={uploading}
+                          onChange={(event) =>
+                            setSourceFiles(Array.from(event.target.files ?? []))
+                          }
+                        />
+                      </label>
+                      {sourceFiles.length > 0 && (
+                        <ul className="source-file-list">
+                          {sourceFiles.map((file) => (
+                            <li key={`${file.name}-${file.size}`}>
+                              <FileSpreadsheet aria-hidden="true" />
+                              <span>{file.name}</span>
+                              <small>{formatBytes(file.size)}</small>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <output
+                        className="source-upload-progress"
+                        aria-live="polite"
+                      >
+                        {uploadProgress}
+                      </output>
+                      <div className="form-actions">
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={uploading}
+                          onClick={closeSourceUpload}
+                        >
+                          취소
+                        </button>
+                        <button
+                          className="primary-action"
+                          type="submit"
+                          disabled={uploading || sourceFiles.length === 0}
+                        >
+                          {uploading ? '검사·저장 중…' : '원본 검사 후 저장'}
+                        </button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </section>
@@ -798,4 +1040,17 @@ function caseStatusLabel(status: ReviewCaseSummary['status']): string {
     approved: '승인 완료',
     archived: '보관',
   }[status];
+}
+
+function declaredContentType(file: File): string {
+  return file.name.toLocaleLowerCase().endsWith('.xlsx')
+    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    : 'text/csv';
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(1)} KB`;
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
 }

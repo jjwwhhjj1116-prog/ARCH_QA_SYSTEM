@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { can, canApproveReport } from './permissions';
+import { can, canApproveReport, rolesForAction } from './permissions';
 
 describe('project permissions', () => {
   it('keeps viewers read-only', () => {
@@ -7,6 +7,14 @@ describe('project permissions', () => {
     expect(can('viewer', 'source:upload')).toBe(false);
     expect(can('viewer', 'report:approve')).toBe(false);
     expect(can('viewer', 'case:create')).toBe(false);
+  });
+
+  it('derives SQL authorization roles from the same grant table', () => {
+    expect(rolesForAction('source:upload')).toEqual([
+      'workspace_admin',
+      'project_owner',
+      'reviewer',
+    ]);
   });
 
   it('allows only working review roles to create a case', () => {

@@ -46,7 +46,18 @@ describe('private file storage', () => {
 
   it('fails closed when an immutable source key already exists', async () => {
     const put = vi.fn().mockResolvedValue(null);
-    const storage = new PrivateR2FileStorage({ put } as unknown as R2Bucket);
+    const head = vi.fn().mockResolvedValue({
+      size: 1,
+      customMetadata: {
+        ...locator,
+        sha256: 'different',
+        size: '1',
+      },
+    });
+    const storage = new PrivateR2FileStorage({
+      put,
+      head,
+    } as unknown as R2Bucket);
     await expect(
       storage.putSourceFile({
         ...locator,
@@ -54,6 +65,35 @@ describe('private file storage', () => {
         contentType: 'application/octet-stream',
       }),
     ).rejects.toThrow('덮어쓸 수 없습니다');
+  });
+
+  it('treats an exact same-byte retry as idempotent', async () => {
+    const body = new Uint8Array([1, 2, 3]);
+    const sha256 =
+      '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
+    const put = vi.fn().mockResolvedValue(null);
+    const head = vi.fn().mockResolvedValue({
+      size: 3,
+      customMetadata: {
+        projectId: locator.projectId,
+        caseId: locator.caseId,
+        sourceVersionId: locator.sourceVersionId,
+        fileId: locator.fileId,
+        sha256,
+        size: '3',
+      },
+    });
+    const storage = new PrivateR2FileStorage({
+      put,
+      head,
+    } as unknown as R2Bucket);
+    await expect(
+      storage.putSourceFile({
+        ...locator,
+        body,
+        contentType: 'application/octet-stream',
+      }),
+    ).resolves.toEqual({ sha256, size: 3 });
   });
 
   it('rejects checksum and size claims that differ from the input snapshot', async () => {
@@ -80,6 +120,7 @@ describe('private file storage', () => {
 
   it('rejects a stored object whose lineage metadata was relabelled', async () => {
     const get = vi.fn().mockResolvedValue({
+      size: 0,
       body: new ArrayBuffer(0),
       customMetadata: {
         ...locator,
@@ -93,5 +134,31 @@ describe('private file storage', () => {
     await expect(storage.getSourceFile(locator)).rejects.toThrow(
       '프로젝트 계보',
     );
+  });
+
+  it('rejects missing, malformed or mismatched size metadata on read', async () => {
+    for (const [metadataSize, objectSize] of [
+      [undefined, 3],
+      ['NaN', 3],
+      ['2', 3],
+    ] as const) {
+      const get = vi.fn().mockResolvedValue({
+        size: objectSize,
+        body: new ArrayBuffer(objectSize),
+        customMetadata: {
+          projectId: locator.projectId,
+          caseId: locator.caseId,
+          sourceVersionId: locator.sourceVersionId,
+          fileId: locator.fileId,
+          sha256: 'b'.repeat(64),
+          ...(metadataSize === undefined ? {} : { size: metadataSize }),
+        },
+        httpMetadata: { contentType: 'application/octet-stream' },
+      });
+      const storage = new PrivateR2FileStorage({ get } as unknown as R2Bucket);
+      await expect(storage.getSourceFile(locator)).rejects.toThrow(
+        '크기 메타데이터',
+      );
+    }
   });
 });
