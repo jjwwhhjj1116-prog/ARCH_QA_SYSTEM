@@ -79,6 +79,7 @@ The repository now contains a tested local vertical slice in addition to the ori
 | `db/`, `drizzle/0001..0003`      | schema, ingestion lineage and scoped idempotency      |
 | `tests/e2e/`                     | browser, responsive, accessibility and isolation flow |
 | `artifacts/qa/phase-1/`          | reproducible local evidence and NO-GO limitations     |
+| `artifacts/qa/phase-2/`          | secure-upload checkpoint evidence and Gate 2 gaps     |
 | `package.json`, `vite.config.ts` | build and full verification commands                  |
 
 Cloudflare provisioning and deployment remain intentionally deferred. The local slice includes source-package intent, bounded byte upload, structural XLSX/CSV preflight and private source storage. It does not yet include semantic workbook inspection, mapping, canonical normalization or the FIN/RC review engine.

@@ -67,8 +67,8 @@ Completion requires code, tests, acceptance evidence and updated docs—not impl
 | P2-014 | Build mapping/unit/floor/exclusion UI                        | frontend_ui                               | P2-007 API           | MAP-004             | TODO        |
 | P2-015 | Build data-quality/diagnostic/skipped-rule UI                | frontend_ui                               | P2-009 API           | NORM-006/007        | TODO        |
 | P2-016 | Add refresh/retry/conflict/browser ingestion tests           | frontend_ui + data_platform owned tests   | P2-012..015          | E2E                 | IN_PROGRESS |
-| P2-017 | Hostile upload/security/performance audit                    | security_reviewer + qa_auditor            | P2-001..016          | Gate 2              | TODO        |
-| P2-018 | Main integration and Gate 2 evidence                         | main                                      | P2-017               | Gate 2 complete     | TODO        |
+| P2-017 | Hostile upload/security/performance audit                    | security_reviewer + qa_auditor            | P2-001..016          | Gate 2              | IN_PROGRESS |
+| P2-018 | Main integration and Gate 2 evidence                         | main                                      | P2-017               | Gate 2 complete     | IN_PROGRESS |
 
 ## Phase 3 — Deterministic FIN MVP
 

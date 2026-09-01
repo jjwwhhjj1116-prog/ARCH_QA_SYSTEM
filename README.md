@@ -56,7 +56,7 @@ npm run check:full
 
 이 명령은 lint, format, TypeScript, unit/API test, production build, coverage, D1 migration 재현, Playwright 4개 viewport, axe와 production dependency audit를 실행합니다.
 
-확정 기준선은 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)와 [acceptance matrix](artifacts/qa/phase-1/acceptance-matrix.md)에 있습니다. 현재 Phase 2A 업로드 변경은 전체 게이트와 별도 증적을 통과한 뒤 `artifacts/qa/phase-2/`에 기록합니다.
+확정 기준선은 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)에 있습니다. 현재 업로드 경계의 로컬 검증은 [Phase 2A QA manifest](artifacts/qa/phase-2/manifest.md)와 [acceptance matrix](artifacts/qa/phase-2/acceptance-matrix.md)에 기록했습니다. Phase 2 전체와 제품 배포 판정은 여전히 NO-GO입니다.
 
 ## 주요 구현 경로
 
