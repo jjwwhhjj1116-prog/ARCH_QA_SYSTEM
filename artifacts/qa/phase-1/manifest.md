@@ -6,6 +6,8 @@ Candidate: local vertical-slice checkpoint; not a production candidate
 
 Toolchain used: Node.js v24.16.0, npm 11.13.0
 
+Verified source commit: `8958d03042a1e62c38a7284473d8ca9a3daa9de5`
+
 ## Source scope
 
 - Korean responsive application shell

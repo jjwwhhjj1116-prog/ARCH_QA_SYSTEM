@@ -6,6 +6,8 @@ Release decision: **NO-GO for production**
 
 Verified scope: local project and FIN/RC review-case management only
 
+Verified source commit: `8958d03042a1e62c38a7284473d8ca9a3daa9de5`
+
 ## Automated gates
 
 | Gate                        | Result                                                                    |
