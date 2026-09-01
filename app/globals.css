@@ -466,12 +466,12 @@ body {
     transform 160ms ease;
 }
 .primary-action {
-  background: #c94a0b;
+  background: #8f3200;
   color: #fff;
   box-shadow: 0 5px 14px rgb(168 64 11 / 20%);
 }
 .primary-action:hover:not(:disabled) {
-  background: #a83d00;
+  background: #712700;
   transform: translateY(-1px);
 }
 .primary-action:disabled {
