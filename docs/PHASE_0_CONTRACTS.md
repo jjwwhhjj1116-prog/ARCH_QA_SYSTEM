@@ -1,14 +1,14 @@
 # Phase 0 계약 동결
 
-상태: **로컬 구현 승인 / 클라우드·배포 미승인**
+상태: **소유자 전용 진단 배포 승인 / 공유·실데이터 운영 미승인**
 
 ## 기술 경계
 
 | 영역          | 결정                                    | 현재 검증 상태                                 |
 | ------------- | --------------------------------------- | ---------------------------------------------- |
-| 런타임        | OpenAI Sites 공식 Vinext scaffold + npm | 로컬 build 확인                                |
-| 관계형 데이터 | D1, binding `DB`                        | 로컬 포트만 구성; 실제 계정 연결 대기          |
-| 파일 바이트   | R2, binding `FILES`                     | 포트만 구성; 실제 계정 연결 대기               |
+| 런타임        | OpenAI Sites 공식 Vinext scaffold + npm | owner-only Sites version 1 배포 확인           |
+| 관계형 데이터 | D1, binding `DB`                        | 원격 migration 10개 테이블 확인                |
+| 파일 바이트   | R2, binding `FILES`                     | binding 배포, 원격 업로드·정리 회귀는 대기     |
 | 인증          | ChatGPT workspace headers               | production fail-closed; local mock은 개발 전용 |
 | 인가          | 서버 역할·프로젝트 membership 검사      | Phase 1 구현·시험 대상                         |
 | 정밀수치      | `decimal.js`, 문자열 직렬화             | Phase 1 계약 시험 대상                         |
@@ -36,8 +36,8 @@
 
 ## 보류·검증 필요
 
-- 실제 Sites workspace header 이름 및 운영 환경 전달 방식
-- 실제 D1/R2 리소스 ID, 지역·보존·삭제 정책
+- 다계정 Sites workspace identity와 프로젝트 IDOR 공격 검증
+- R2 원격 업로드, 고아 객체 reconciliation, 만료·보존·삭제 정책
 - 업로드 최대 크기와 스트리밍 동작의 플랫폼 한계
 - ThreeUI MCP 계정 권한과 실효성
 - 조직 승인 전 외부 AI 공급자 사용 금지

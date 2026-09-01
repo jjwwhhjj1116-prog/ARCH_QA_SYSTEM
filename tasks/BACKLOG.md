@@ -155,18 +155,18 @@ Completion requires code, tests, acceptance evidence and updated docs—not impl
 
 ## Phase 7 — Candidate and release
 
-| ID     | Task                                                          | Owner                  | Depends   | Acceptance / output | Status |
-| ------ | ------------------------------------------------------------- | ---------------------- | --------- | ------------------- | ------ |
-| P7-001 | Verify exact commit, clean source, migrations and QA manifest | main                   | P6-012    | release source      | TODO   |
-| P7-002 | Release-manager read-only audit                               | release_manager        | P7-001    | GO/NO-GO            | TODO   |
-| P7-003 | Resolve NO-GO findings and re-run evidence                    | assigned owner + main  | P7-002    | checklist pass      | TODO   |
-| P7-004 | Save Sites candidate without production deployment            | main                   | P7-002 GO | PLAT-006/REL-003    | TODO   |
-| P7-005 | Review candidate source/migrations/access/core smoke          | main + qa_auditor      | P7-004    | candidate evidence  | TODO   |
-| P7-006 | Present candidate, risks, audience and rollback to user       | main                   | P7-005    | approval request    | TODO   |
-| P7-007 | Obtain explicit deployment and audience approval              | user                   | P7-006    | REL-004             | TODO   |
-| P7-008 | Deploy only approved saved version                            | main                   | P7-007    | production URL      | TODO   |
-| P7-009 | Verify intended and unauthorized visitor behavior             | main + qa_auditor      | P7-008    | REL-005             | TODO   |
-| P7-010 | Inspect production health and finalize release evidence       | main + release_manager | P7-009    | release complete    | TODO   |
+| ID     | Task                                                          | Owner                  | Depends   | Acceptance / output | Status      |
+| ------ | ------------------------------------------------------------- | ---------------------- | --------- | ------------------- | ----------- |
+| P7-001 | Verify exact commit, clean source, migrations and QA manifest | main                   | P6-012    | release source      | TODO        |
+| P7-002 | Release-manager read-only audit                               | release_manager        | P7-001    | GO/NO-GO            | TODO        |
+| P7-003 | Resolve NO-GO findings and re-run evidence                    | assigned owner + main  | P7-002    | checklist pass      | TODO        |
+| P7-004 | Save Sites candidate without production deployment            | main                   | P7-002 GO | PLAT-006/REL-003    | DONE        |
+| P7-005 | Review candidate source/migrations/access/core smoke          | main + qa_auditor      | P7-004    | candidate evidence  | DONE        |
+| P7-006 | Present candidate, risks, audience and rollback to user       | main                   | P7-005    | approval request    | DONE        |
+| P7-007 | Obtain explicit deployment and audience approval              | user                   | P7-006    | REL-004             | DONE        |
+| P7-008 | Deploy only approved saved version                            | main                   | P7-007    | production URL      | DONE        |
+| P7-009 | Verify intended and unauthorized visitor behavior             | main + qa_auditor      | P7-008    | REL-005             | IN_PROGRESS |
+| P7-010 | Inspect production health and finalize release evidence       | main + release_manager | P7-009    | release complete    | IN_PROGRESS |
 
 ## Critical path
 
@@ -186,11 +186,11 @@ ThreeUI and AI are not on the critical path.
 ## Current execution note — 2026-09-01
 
 - The statuses above separate local code completion from remote platform verification.
-- P0-005 and P1-008 remain `IN_PROGRESS`: local `DB`/`FILES` contracts and the R2 adapter exist, but actual Cloudflare resources are intentionally deferred.
+- P0-005 Cloudflare Sites/D1/R2 provisioning is complete for an owner-only diagnostic environment. P1-008 remains `IN_PROGRESS` until hosted identity and multi-account isolation are attacked end-to-end.
 - P1-002 is complete only for the initial migration on a clean local database plus idempotent reapplication; release upgrade/recovery fixtures remain a later hardening requirement.
 - P1-005, P1-009, P1-010 and P1-013 are complete for the project/review-case slice, not for ingestion or the review engine.
 - P1-012 still needs the complete production role matrix even though project-scoped case denial is covered locally.
-- The Phase 1 product gate remains **NO-GO**. Development now proceeds locally into Phase 2 ingestion and Phase 3 deterministic review without waiting for Cloudflare provisioning.
+- The Phase 1 operational product gate remains **NO-GO**. The owner-only deployment is approved only for UI and synthetic diagnostics while Phase 2 ingestion and Phase 3 deterministic review continue.
 - Phase 2A now has additive ingestion migrations, package-intent API, bounded byte upload, structural XLSX/CSV preflight, exact private R2 storage and a basic multi-file upload UI.
 - The current byte request performs authorized storage and D1 completion against one inspected snapshot. Orphan reconciliation, expired cleanup, status refresh, semantic workbook inspection, project identity verification, mapping and canonical normalization remain incomplete.
 - The Phase 2 gate remains **NO-GO** until those missing boundaries and Phase 2 evidence are completed; P2-001..004, P2-012 and P2-016 therefore remain `IN_PROGRESS`.

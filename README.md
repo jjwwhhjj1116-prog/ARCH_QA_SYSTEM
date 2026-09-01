@@ -4,7 +4,11 @@
 
 ## 현재 상태
 
-**로컬 수직 슬라이스 구현 중 — 프로덕션 배포 불가**
+**소유자 전용 Cloudflare Sites 진단 배포 완료 — 실데이터 운영은 아직 불가**
+
+현재 배포 주소: [FIN & RC 물량 검수 스튜디오](https://fin-rc-review-studio.yun0421.chatgpt.site)
+
+이 주소는 현재 소유자 1명만 허용한 비공개 배포입니다. GitHub Pages는 저장소 문서만 정적으로 보여 주므로 이 서버 애플리케이션의 검수 화면·D1·R2 API를 실행할 수 없습니다.
 
 현재 실제로 동작하는 범위:
 
@@ -31,9 +35,9 @@
 - 조적 전면 제외와 부위 하드룰을 포함한 FIN 결정론 검수
 - RC 규칙, Finding/Evidence, 조정·재실행
 - 보고서·승인·감사 관리
-- 실제 Sites identity 및 원격 D1/R2 연결
+- 다계정 Sites identity/인가 공격 검증과 원격 R2 실제 업로드 회귀
 
-따라서 현재 앱은 **검수 엔진을 담을 보안 골격**이며 완성된 물량 검수 제품이 아닙니다. Cloudflare 연결과 배포는 사용자 지시에 따라 보류하고, 다음 개발은 로컬 ingestion과 결정론 검수 엔진을 우선합니다.
+따라서 현재 앱은 **검수 엔진을 담을 보안 골격**이며 완성된 물량 검수 제품이 아닙니다. Cloudflare Sites와 D1/R2 binding은 연결했지만, 현재 배포는 화면·인증 경계·migration을 확인하기 위한 소유자 전용 합성시험 환경입니다. 실제 고객 산출서와 집계표는 남은 검수 엔진·보존/정리·대용량 안전성 gate가 끝날 때까지 업로드하지 않습니다.
 
 ## 로컬 실행
 
@@ -56,7 +60,7 @@ npm run check:full
 
 이 명령은 lint, format, TypeScript, unit/API test, production build, coverage, D1 migration 재현, Playwright 4개 viewport, axe와 production dependency audit를 실행합니다.
 
-확정 기준선은 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)에 있습니다. 현재 업로드 경계의 로컬 검증은 [Phase 2A QA manifest](artifacts/qa/phase-2/manifest.md)와 [acceptance matrix](artifacts/qa/phase-2/acceptance-matrix.md)에 기록했습니다. Phase 2 전체와 제품 배포 판정은 여전히 NO-GO입니다.
+확정 기준선은 [Phase 1 QA manifest](artifacts/qa/phase-1/manifest.md)에 있습니다. 현재 업로드 경계의 로컬 검증은 [Phase 2A QA manifest](artifacts/qa/phase-2/manifest.md)와 [acceptance matrix](artifacts/qa/phase-2/acceptance-matrix.md)에 기록했습니다. 소유자 전용 진단 배포 증적은 [deployment candidate 1 manifest](artifacts/qa/deployment-candidate-1/manifest.md)에 있습니다. Phase 2 전체와 실제 고객 데이터 운영 판정은 여전히 NO-GO입니다.
 
 ## 주요 구현 경로
 
@@ -76,12 +80,14 @@ npm run check:full
 | `docs/`                       | 전체 PRD, 아키텍처, 검수 엔진 및 보안 계약 |
 | `tasks/BACKLOG.md`            | 구현 단계와 실제 상태                      |
 
-## 배포 경계
+## 배포 상태와 경계
 
-- `.openai/hosting.json`은 논리적 binding 이름 `DB`와 `FILES`만 선언합니다.
+- `.openai/hosting.json`은 Sites 프로젝트와 논리적 binding 이름 `DB`, `FILES`를 선언합니다.
 - `npm run build`은 Sites 산출물과 `dist/.openai/drizzle` migration을 생성합니다.
-- 실제 Cloudflare resource provisioning, Sites candidate 저장, audience 검증 및 production deploy는 하지 않습니다.
-- 배포는 별도의 보안·QA gate와 사용자 명시 승인 후에만 가능합니다.
+- 사용자 승인 후 정확한 검증 커밋을 Sites version 1로 저장하고 소유자 전용으로 배포했습니다.
+- 원격 D1 migration 10개 테이블, 비인증 API 401, 실제 앱 셸 렌더링을 확인했습니다.
+- R2 binding은 배포됐지만 원격 업로드·고아 객체 정리·보존정책 검증은 아직 release blocker입니다.
+- 현재 배포의 의미는 **웹 화면 검수와 합성시험 가능**이며, 공유·고객 데이터·운영 사용 승인은 아닙니다.
 
 ## 최상위 기준 문서
 

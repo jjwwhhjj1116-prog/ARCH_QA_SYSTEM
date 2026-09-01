@@ -82,4 +82,4 @@ The repository now contains a tested local vertical slice in addition to the ori
 | `artifacts/qa/phase-2/`          | secure-upload checkpoint evidence and Gate 2 gaps     |
 | `package.json`, `vite.config.ts` | build and full verification commands                  |
 
-Cloudflare provisioning and deployment remain intentionally deferred. The local slice includes source-package intent, bounded byte upload, structural XLSX/CSV preflight and private source storage. It does not yet include semantic workbook inspection, mapping, canonical normalization or the FIN/RC review engine.
+Cloudflare Sites version 1 is now deployed with owner-only access at `https://fin-rc-review-studio.yun0421.chatgpt.site`. D1 migrations and the logical `DB`/`FILES` bindings are provisioned. This remains a synthetic diagnostic deployment: semantic workbook inspection, mapping, canonical normalization, the FIN/RC review engine, remote R2 reconciliation/retention, and operational customer-data approval are not complete.
