@@ -21,14 +21,18 @@ describe('ReviewStudio', () => {
         status: 200,
       }),
     );
-    render(<ReviewStudio />);
+    render(
+      <ReviewStudio
+        currentUser={{ displayName: '김PM', email: 'pm@concost.example' }}
+      />,
+    );
     expect(
-      within(screen.getByRole('navigation')).getByText('검수 프로젝트'),
+      within(screen.getByRole('navigation')).getByText('프로젝트·자료'),
     ).toBeVisible();
-    expect(screen.getByText('산출서와 집계표')).toBeVisible();
     await waitFor(() =>
       expect(screen.getByText('첫 검수 프로젝트를 등록하세요')).toBeVisible(),
     );
+    expect(screen.getByText(/산출서와 집계표/u)).toBeVisible();
   });
 
   it('shows an actionable error state instead of a blank surface', async () => {
@@ -44,7 +48,11 @@ describe('ReviewStudio', () => {
         { status: 500 },
       ),
     );
-    render(<ReviewStudio />);
+    render(
+      <ReviewStudio
+        currentUser={{ displayName: '김PM', email: 'pm@concost.example' }}
+      />,
+    );
     await waitFor(() =>
       expect(screen.getByText('저장소를 열지 못했습니다.')).toBeVisible(),
     );
@@ -81,7 +89,7 @@ describe('ReviewStudio', () => {
             data: {
               id: '22222222-2222-4222-8222-222222222222',
               projectId: project.id,
-              name: '웹 검수 프로젝트 FIN 검수 1',
+              name: '웹 검수 프로젝트 마감 검수 1',
               discipline: 'FIN',
               status: 'draft',
               ownerId: 'local-user-owner',
@@ -94,15 +102,19 @@ describe('ReviewStudio', () => {
       }
       return new Response(JSON.stringify({ data: [], requestId: 'r2' }));
     });
-    render(<ReviewStudio />);
-    const row = await screen.findByRole('row', { name: /P100/u });
+    render(
+      <ReviewStudio
+        currentUser={{ displayName: '김PM', email: 'pm@concost.example' }}
+      />,
+    );
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(within(row).getByRole('button', { name: '검수 열기' }));
     await screen.findByText(
-      '아직 검수 케이스가 없습니다. FIN 또는 RC 검수를 추가하세요.',
+      '아직 검수 케이스가 없습니다. 마감 또는 구조 검수를 추가하세요.',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'FIN 검수 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '마감 검수 추가' }));
     expect(
-      await screen.findByText('웹 검수 프로젝트 FIN 검수 1'),
+      await screen.findByText('웹 검수 프로젝트 마감 검수 1'),
     ).toBeVisible();
     expect(screen.getByText('초안')).toBeVisible();
   });
@@ -142,13 +154,17 @@ describe('ReviewStudio', () => {
           else resolveP2 = resolve;
         });
       });
-    render(<ReviewStudio />);
-    const p1 = await screen.findByRole('row', { name: /P1/u });
+    render(
+      <ReviewStudio
+        currentUser={{ displayName: '김PM', email: 'pm@concost.example' }}
+      />,
+    );
+    const p1 = await screen.findByRole('row', { name: /P1 프로젝트/u });
     fireEvent.click(within(p1).getByRole('button', { name: '검수 열기' }));
     await screen.findByRole('heading', { name: 'P1 프로젝트' });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(resolveP1).toBeTypeOf('function'));
-    const p2 = screen.getByRole('row', { name: /P2/u });
+    const p2 = screen.getByRole('row', { name: /P2 프로젝트/u });
     fireEvent.click(within(p2).getByRole('button', { name: '검수 열기' }));
     await waitFor(() => expect(resolveP2).toBeTypeOf('function'));
     resolveP2?.(

@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-OpenAI Sites/Vinext, React 19, TypeScript, Tailwind CSS, shadcn primitives, Cloudflare D1/R2 ports. Cloudflare provisioning and deployment are explicitly deferred; local implementation and verification come first.
+OpenAI Sites/Vinext, React 19, TypeScript, Cloudflare D1/R2 bindings, CSS design tokens, shadcn primitives. Sites owner-only 배포와 로컬 검증을 병행하며, 회사 임직원 명부·ERP 프로젝트 연동은 후속 과제다.
 
 ## Users
 
@@ -19,7 +19,7 @@ OpenAI Sites/Vinext, React 19, TypeScript, Tailwind CSS, shadcn primitives, Clou
 
 ## Product Purpose
 
-FIN 및 RC 산출서·집계표를 교차 검증하는 상위 검수 계층이다. 사용자가 원본 계보, 매핑, 계산 근거, 예외와 미검증 범위를 잃지 않은 채 프로젝트 단위로 검토하고 승인 가능한 보고서를 만들도록 한다.
+물량산출 완료 후 구조·마감 산출서와 집계표를 교차 검증하는 상위 QA 계층이다. 사용자가 원본 계보, 매핑, 계산 근거, 예외와 미검증 범위를 잃지 않은 채 프로젝트 단위로 검토하고 승인 가능한 분석표와 Excel 보고서를 만들도록 한다.
 
 ## Positioning
 
@@ -37,11 +37,13 @@ AI가 숫자나 오류를 임의 확정하지 않는다. 결정론 규칙(Level 
 - Level C는 검토 후보일 뿐 확정·종결·승인 권한이 없다.
 - 프로젝트 경계·역할·자기승인 금지는 서버에서 강제한다.
 - D1은 관계형 메타데이터, R2는 원본/산출물 바이트를 담당한다.
-- 실제 Cloudflare 연결, 외부 AI 공급자, 배포와 공개 범위는 별도 승인 전까지 비활성이다.
+- 현재 검수 엔진, 중복 통합, 4대 소스 면적 분석, Excel 확정 출력은 미구현 상태를 `N/A · 미실행`으로 표시하며 가짜 결과를 만들지 않는다.
+- 회사 임직원 전용 인증은 현재 Sites 비공개 접근 목록으로 제한한다. 회사 명부/SSO 정책 연동 전에는 전사 인증 완료로 간주하지 않는다.
+- 프로젝트명은 ERP 그룹웨어와 동일한 이름을 사용한다. 내부 저장용 불투명 식별자는 시스템이 생성하며 사용자가 코드를 입력하지 않는다.
 
 ## Brand Commitments
 
-제품명은 `FIN & RC Review Studio`. 기존 CON COST의 짙은 작업 내비게이션과 주황색 행동 강조를 유지한다. 아이콘만 있는 탐색은 금지하고 한국어 텍스트 메뉴를 항상 제공한다. 화면 문구에서는 “FIN 자료” 대신 “산출서와 집계표”를 사용한다.
+제품명은 `QTO QA & Analytics Studio`. `#070d1e` 기반 하이테크 다크 글래스모피즘, Electric Cyan 상태 강조, CON COST 브랜드를 사용한다. 아이콘만 있는 탐색은 금지하고 한국어 텍스트 메뉴를 항상 제공한다. 화면 문구에서는 “FIN 자료” 대신 “산출서와 집계표”를 사용한다.
 
 ## Evidence on Hand
 
@@ -56,7 +58,7 @@ AI가 숫자나 오류를 임의 확정하지 않는다. 결정론 규칙(Level 
 2. 계산 결과보다 원본 계보와 재현성을 먼저 보존한다.
 3. 차단 사유와 다음 행동을 한 화면에서 설명한다.
 4. 자동화는 사람의 검토·승인 책임을 대체하지 않는다.
-5. 배포보다 로컬 검증과 공격 테스트를 먼저 끝낸다.
+5. 배포 후보는 로컬·브라우저·접근성·공격 테스트를 모두 통과한 동일 커밋이어야 한다.
 
 ## Accessibility & Inclusion
 

@@ -72,29 +72,33 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(
     page.getByRole('heading', { name: '검수 프로젝트', level: 1 }),
   ).toBeVisible();
-  await expect(
-    page.getByText('산출서와 집계표', { exact: true }),
-  ).toBeVisible();
   await expect(page.getByRole('status')).not.toContainText('불러오는 중');
-  const code = `E2E${testInfo.project.name.replace(/\W/gu, '').toUpperCase()}${Date.now()}`;
+  const testToken = `${testInfo.project.name.replace(/\W/gu, '').toUpperCase()}${Date.now()}`;
+  const projectName = `브라우저 통합 검수 ${testToken}`;
   await page.getByRole('button', { name: '새 프로젝트' }).click();
-  await page.getByLabel('프로젝트 코드').fill(code);
-  await page.getByLabel('프로젝트명').fill('브라우저 통합 검수');
+  await page.getByLabel('프로젝트명').fill(projectName);
   await page.getByLabel('발주처·고객사 (선택)').fill('로컬 자동시험');
   await page.getByRole('button', { name: '프로젝트 만들기' }).click();
   await expect(
-    page.getByRole('row', { name: new RegExp(code, 'u') }),
+    page.getByRole('row', { name: new RegExp(projectName, 'u') }),
   ).toBeVisible();
-  await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(code);
-  const projectRow = page.getByRole('row', { name: new RegExp(code, 'u') });
+  await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(projectName);
+  const projectRow = page.getByRole('row', {
+    name: new RegExp(projectName, 'u'),
+  });
   await expect(projectRow).toBeVisible();
   await projectRow.getByRole('button', { name: '검수 열기' }).click();
   await expect(
-    page.getByRole('heading', { name: '브라우저 통합 검수', level: 2 }),
+    page.getByRole('heading', { name: projectName, level: 2 }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'FIN 검수 추가' }).click();
   await expect(
-    page.getByText('브라우저 통합 검수 FIN 검수 1', { exact: true }),
+    page.getByText('아직 검수 케이스가 없습니다.', { exact: false }),
+  ).toBeVisible();
+  const addFinishCase = page.getByRole('button', { name: '마감 검수 추가' });
+  await expect(addFinishCase).toBeEnabled();
+  await addFinishCase.click();
+  await expect(
+    page.getByText(`${projectName} 마감 검수 1`, { exact: true }),
   ).toBeVisible();
   await page
     .getByRole('button', { name: '산출서와 집계표 등록', exact: true })
@@ -126,10 +130,10 @@ test('project page exposes the full Korean workflow and persists a new project',
   const projectsResponse = await page.request.get('/api/projects');
   expect(projectsResponse.status()).toBe(200);
   const projectsBody = (await projectsResponse.json()) as {
-    data: Array<{ id: string; code: string }>;
+    data: Array<{ id: string; code: string; name: string }>;
   };
   const projectId = projectsBody.data.find(
-    (project) => project.code === code,
+    (project) => project.name === projectName,
   )?.id;
   expect(projectId).toBeTruthy();
   const casesResponse = await page.request.get(
@@ -140,7 +144,7 @@ test('project page exposes the full Korean workflow and persists a new project',
     data: Array<{ id: string; name: string }>;
   };
   const caseId = casesBody.data.find(
-    (reviewCase) => reviewCase.name === '브라우저 통합 검수 FIN 검수 1',
+    (reviewCase) => reviewCase.name === `${projectName} 마감 검수 1`,
   )?.id;
   expect(caseId).toBeTruthy();
   const takeoffBody = Buffer.from('품명,수량\n도장,12.5\n', 'utf8');
@@ -163,7 +167,7 @@ test('project page exposes the full Korean workflow and persists a new project',
     ],
   };
   const packageHeaders = {
-    'idempotency-key': `package-${code}`,
+    'idempotency-key': `package-${testToken}`,
     'sec-fetch-site': 'same-origin',
   };
   const packageUrl = `/api/projects/${projectId}/cases/${caseId}/source-packages`;
@@ -312,7 +316,7 @@ test('project page exposes the full Korean workflow and persists a new project',
     {
       data: packagePayload,
       headers: {
-        'idempotency-key': `mixed-${code}`,
+        'idempotency-key': `mixed-${testToken}`,
         'sec-fetch-site': 'same-origin',
       },
     },
@@ -328,15 +332,15 @@ test('project page exposes the full Korean workflow and persists a new project',
   expect(denied.status()).toBe(403);
   await page.reload();
   await expect(
-    page.getByRole('row', { name: new RegExp(code, 'u') }),
+    page.getByRole('row', { name: new RegExp(projectName, 'u') }),
   ).toBeVisible();
-  await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(code);
+  await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(projectName);
   await page
-    .getByRole('row', { name: new RegExp(code, 'u') })
+    .getByRole('row', { name: new RegExp(projectName, 'u') })
     .getByRole('button', { name: '검수 열기' })
     .click();
   await expect(
-    page.getByText('브라우저 통합 검수 FIN 검수 1', { exact: true }),
+    page.getByText(`${projectName} 마감 검수 1`, { exact: true }),
   ).toBeVisible();
 });
 
@@ -364,16 +368,16 @@ test('mobile navigation opens with readable text labels', async ({
   await menuButton.click();
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
   await expect(
-    page.getByRole('navigation').getByText('검수 프로젝트'),
+    page.getByRole('navigation').getByText('프로젝트·자료'),
   ).toBeVisible();
   await expect(
-    page.getByRole('navigation').getByText('자료 라이브러리'),
+    page.getByRole('navigation').getByText('산출식 이상치'),
   ).toBeVisible();
   const closeButton = page.getByRole('button', { name: '메뉴 닫기' }).first();
   await expect(closeButton).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(
-    page.getByRole('navigation').getByRole('button', { name: '검수 프로젝트' }),
+    page.getByRole('navigation').getByRole('button', { name: '보고서·Excel' }),
   ).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(closeButton).toBeFocused();

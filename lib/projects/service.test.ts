@@ -12,6 +12,18 @@ const actor: Actor = {
 };
 
 describe('project service', () => {
+  it('creates an opaque internal code when the UI registers by project name', async () => {
+    const repository = new MemoryProjectRepository();
+    const service = new ProjectService(repository);
+    const project = await service.create(
+      actor,
+      { name: '덕천3구역 재건축', clientName: '한화건설' },
+      'req-manual',
+    );
+    expect(project.code).toMatch(/^MANUAL-[0-9A-F]{32}$/u);
+    expect(project.name).toBe('덕천3구역 재건축');
+  });
+
   it('normalizes the code, creates owner membership and writes audit evidence', async () => {
     const repository = new MemoryProjectRepository();
     const service = new ProjectService(repository);

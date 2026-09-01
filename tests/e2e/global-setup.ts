@@ -42,7 +42,7 @@ async function isReady(): Promise<boolean> {
       signal: AbortSignal.timeout(1_000),
     });
     if (!response.ok) return false;
-    return (await response.text()).includes('FIN &amp; RC Review Studio');
+    return (await response.text()).includes('QTO QA &amp; Analytics Studio');
   } catch {
     return false;
   }

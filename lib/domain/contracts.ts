@@ -22,7 +22,8 @@ export const createProjectSchema = z.object({
     .string()
     .trim()
     .min(2, '프로젝트 코드는 2자 이상이어야 합니다.')
-    .max(40),
+    .max(40)
+    .optional(),
   name: z
     .string()
     .trim()

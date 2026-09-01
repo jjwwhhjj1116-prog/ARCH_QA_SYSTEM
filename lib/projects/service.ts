@@ -19,9 +19,12 @@ export class ProjectService {
     requestId: string,
   ): Promise<ProjectSummary> {
     const parsed = createProjectSchema.parse(input);
+    const id = crypto.randomUUID();
     return this.repository.create({
-      id: crypto.randomUUID(),
-      code: canonicalProjectCode(parsed.code),
+      id,
+      code: parsed.code
+        ? canonicalProjectCode(parsed.code)
+        : internalProjectCode(id),
       name: parsed.name,
       clientName: parsed.clientName || null,
       actor,
@@ -34,4 +37,8 @@ export class ProjectService {
 
 export function canonicalProjectCode(value: string): string {
   return value.normalize('NFKC').replace(/\s+/gu, '').toUpperCase();
+}
+
+function internalProjectCode(projectId: string): string {
+  return `MANUAL-${projectId.replaceAll('-', '').toUpperCase()}`;
 }

@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './qto-studio.css';
 
 export const metadata: Metadata = {
-  title: 'FIN & RC Review Studio',
+  title: 'QTO QA & Analytics Studio',
   description:
     '산출서와 집계표의 근거·계보·검수 결과를 확인하는 사내 검수 시스템',
 };
@@ -19,7 +20,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body
+        data-design-contract="high-tech-dark-glass"
+        data-design-seed="9f1a8b94"
+      >
+        {children}
+      </body>
     </html>
   );
 }
