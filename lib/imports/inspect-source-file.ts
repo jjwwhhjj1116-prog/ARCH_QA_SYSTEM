@@ -591,7 +591,7 @@ function inspectXmlEntry(
     );
   }
   validateXmlAndRoot(text);
-  assertNoActiveContentDeclaration(text);
+  assertNoActiveContentDeclaration(name, text);
   if (
     name.startsWith('xl/externallinks/') ||
     /TargetMode\s*=\s*["']External["']/iu.test(text)
@@ -600,20 +600,54 @@ function inspectXmlEntry(
   }
 }
 
-function assertNoActiveContentDeclaration(text: string): void {
-  if (
-    /(?:ContentType|Type)\s*=\s*["'][^"']*(?:vbaProject|macroEnabled)[^"']*["']/iu.test(
-      text,
-    )
-  ) {
+function assertNoActiveContentDeclaration(name: string, text: string): void {
+  if (name === '[content_types].xml') {
+    const contentTypes = [
+      ...text.matchAll(/\bContentType\s*=\s*["']([^"']+)["']/giu),
+    ].map((match) => match[1].toLocaleLowerCase());
+    if (
+      contentTypes.some((value) => /(?:vbaproject|macroenabled)/u.test(value))
+    ) {
+      throw new SourceInspectionError(
+        'FILE_XLSX_MACRO',
+        '매크로 콘텐츠 유형이 있는 통합문서는 등록할 수 없습니다.',
+      );
+    }
+    if (
+      contentTypes.some((value) =>
+        /(?:activexcontrolbinary|activexcontrol|activex|oleobject|embeddedpackage)/u.test(
+          value,
+        ),
+      )
+    ) {
+      throw new SourceInspectionError(
+        'FILE_XLSX_ACTIVE_CONTENT',
+        'ActiveX 또는 포함 개체 콘텐츠 유형이 있는 통합문서는 등록할 수 없습니다.',
+      );
+    }
+    return;
+  }
+  if (!name.endsWith('.rels')) return;
+
+  const relationshipTypes = [
+    ...text.matchAll(/<Relationship\b[^>]*\bType\s*=\s*["']([^"']+)["']/giu),
+  ].map((match) => relationshipTypeName(match[1]));
+  if (relationshipTypes.some((value) => value === 'vbaproject')) {
     throw new SourceInspectionError(
       'FILE_XLSX_MACRO',
-      '매크로 콘텐츠 유형 또는 관계가 있는 통합문서는 등록할 수 없습니다.',
+      '매크로 관계가 있는 통합문서는 등록할 수 없습니다.',
     );
   }
   if (
-    /(?:ContentType|Type)\s*=\s*["'][^"']*(?:activeX|oleObject|embeddedPackage|\/package)[^"']*["']/iu.test(
-      text,
+    relationshipTypes.some((value) =>
+      new Set([
+        'activex',
+        'activexcontrol',
+        'activexcontrolbinary',
+        'oleobject',
+        'embeddedpackage',
+        'package',
+      ]).has(value),
     )
   ) {
     throw new SourceInspectionError(
@@ -621,6 +655,11 @@ function assertNoActiveContentDeclaration(text: string): void {
       'ActiveX 또는 포함 개체 관계가 있는 통합문서는 등록할 수 없습니다.',
     );
   }
+}
+
+function relationshipTypeName(value: string): string {
+  const withoutSuffix = value.split(/[?#]/u, 1)[0].replace(/\/+$/u, '');
+  return (withoutSuffix.split('/').pop() ?? '').toLocaleLowerCase();
 }
 
 function assertXmlRoot(

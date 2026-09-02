@@ -291,6 +291,46 @@ describe('inspectSourceFile', () => {
     expect(result.warnings).toEqual(['EXTERNAL_LINKS_PRESENT']);
   });
 
+  it('accepts standard OOXML package relationships used by FIN workbooks', async () => {
+    const result = await inspectSourceFile({
+      filename: '가설산출서.xlsx',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      body: fakeZip([
+        {
+          name: '[Content_Types].xml',
+          compressed: 1,
+          uncompressed: 30,
+          content:
+            '<Types><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>',
+        },
+        { name: 'xl/workbook.xml', compressed: 1, uncompressed: 40 },
+        {
+          name: '_rels/.rels',
+          compressed: 1,
+          uncompressed: 120,
+          content:
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>',
+        },
+        {
+          name: 'xl/worksheets/_rels/sheet1.xml.rels',
+          compressed: 1,
+          uncompressed: 120,
+          content:
+            '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings" Target="../printerSettings/printerSettings1.bin"/></Relationships>',
+        },
+        {
+          name: 'xl/printerSettings/printerSettings1.bin',
+          compressed: 1,
+          uncompressed: 8,
+        },
+      ]),
+    });
+
+    expect(result.format).toBe('xlsx');
+    expect(result.warnings).toEqual([]);
+  });
+
   it('bounds actual inflation when the ZIP directory understates expanded bytes', async () => {
     await expectInspectionCode(
       inspectSourceFile({
@@ -317,6 +357,18 @@ describe('inspectSourceFile', () => {
     ],
     [
       '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="custom.bin" /></Relationships>',
+      'FILE_XLSX_ACTIVE_CONTENT',
+    ],
+    [
+      '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="embedded.bin" /></Relationships>',
+      'FILE_XLSX_ACTIVE_CONTENT',
+    ],
+    [
+      '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package/?bypass=1#fragment" Target="embedded.bin" /></Relationships>',
+      'FILE_XLSX_ACTIVE_CONTENT',
+    ],
+    [
+      '<Types><Override PartName="/xl/active.bin" ContentType="application/vnd.ms-office.activeX+xml" /></Types>',
       'FILE_XLSX_ACTIVE_CONTENT',
     ],
   ])(
@@ -352,6 +404,30 @@ describe('inspectSourceFile', () => {
       );
     },
   );
+
+  it('does not interpret unrelated worksheet Type attributes as relationships', async () => {
+    const result = await inspectSourceFile({
+      filename: '산출서.xlsx',
+      contentType: 'application/octet-stream',
+      body: fakeZip([
+        {
+          name: '[Content_Types].xml',
+          compressed: 1,
+          uncompressed: 30,
+          content: '<Types></Types>',
+        },
+        { name: 'xl/workbook.xml', compressed: 1, uncompressed: 40 },
+        {
+          name: 'xl/worksheets/sheet1.xml',
+          compressed: 1,
+          uncompressed: 80,
+          content: '<worksheet><cell Type="oleObject"/></worksheet>',
+        },
+      ]),
+    });
+
+    expect(result.format).toBe('xlsx');
+  });
 });
 
 async function expectInspectionCode(

@@ -435,20 +435,20 @@ function ProjectContextSelector({
   onOpenRegistration: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const candidates = useMemo(() => {
+  const matchingProjects = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    return projects
-      .filter(
-        (project) =>
-          !normalized ||
-          `${project.name} ${project.clientName ?? ''}`
-            .toLocaleLowerCase()
-            .includes(normalized),
-      )
-      .slice(0, 6);
+    return projects.filter(
+      (project) =>
+        !normalized ||
+        `${project.name} ${project.clientName ?? ''}`
+          .toLocaleLowerCase()
+          .includes(normalized),
+    );
   }, [projects, query]);
+  const candidates = matchingProjects.slice(0, 6);
   const candidate =
     projects.find((project) => project.id === candidateId) ?? null;
+  const candidateIsCurrent = candidate?.id === currentProject?.id;
 
   return (
     <section
@@ -457,11 +457,14 @@ function ProjectContextSelector({
     >
       <div className="project-context-heading">
         <div>
-          <span className="panel-kicker">PROJECT CONTEXT · RAG STATUS</span>
+          <span className="panel-kicker">PROJECT SELECTOR · RAG STATUS</span>
           <h2 id="project-context-title">
-            자료를 저장할 프로젝트를 확정하세요
+            자료를 등록할 프로젝트를 선택하세요
           </h2>
-          <p>검색 → 후보 선택 → 프로젝트 경계 확정 순서로 진행합니다.</p>
+          <p>
+            이름으로 검색하거나 전체 목록에서 선택한 뒤 프로젝트 경계를
+            확정하세요.
+          </p>
         </div>
         <button
           className="secondary-action"
@@ -476,30 +479,34 @@ function ProjectContextSelector({
         className="project-context-rag"
         aria-label="프로젝트 자료 등록 준비 단계"
       >
-        <li data-state="done">
-          <Check aria-hidden="true" />
+        <li data-state={candidate ? 'done' : 'current'}>
+          {candidate ? (
+            <Check aria-hidden="true" />
+          ) : (
+            <span className="rag-dot" aria-hidden="true" />
+          )}
           <span>
-            <strong>1. 프로젝트 검색</strong>
-            <small>이름·발주처로 찾기</small>
+            <strong>1. 프로젝트 찾기</strong>
+            <small>검색 또는 전체 목록</small>
           </span>
         </li>
-        <li data-state={candidate ? 'current' : 'waiting'}>
-          <span className="rag-dot" aria-hidden="true" />
+        <li data-state={candidate ? 'done' : 'waiting'}>
+          {candidate ? (
+            <Check aria-hidden="true" />
+          ) : (
+            <span className="rag-dot" aria-hidden="true" />
+          )}
           <span>
-            <strong>2. 후보 선택</strong>
+            <strong>2. 선택 후보 확인</strong>
             <small>{candidate ? candidate.name : '선택 대기'}</small>
           </span>
         </li>
         <li
           data-state={
-            candidate && candidate.id !== currentProject?.id
-              ? 'current'
-              : currentProject
-                ? 'done'
-                : 'waiting'
+            candidateIsCurrent ? 'done' : candidate ? 'current' : 'waiting'
           }
         >
-          {currentProject && candidate?.id === currentProject.id ? (
+          {candidateIsCurrent ? (
             <Check aria-hidden="true" />
           ) : (
             <span className="rag-dot" aria-hidden="true" />
@@ -507,9 +514,9 @@ function ProjectContextSelector({
           <span>
             <strong>3. 경계 확정</strong>
             <small>
-              {candidate && candidate.id !== currentProject?.id
+              {candidate && !candidateIsCurrent
                 ? '변경 확정 대기'
-                : currentProject
+                : candidateIsCurrent
                   ? '이 프로젝트에만 저장'
                   : '확정 대기'}
             </small>
@@ -517,55 +524,115 @@ function ProjectContextSelector({
         </li>
       </ol>
 
-      <div className="project-context-flow">
-        <label className="project-context-search">
-          <Search aria-hidden="true" />
-          <span className="sr-only">자료를 등록할 프로젝트 검색</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="프로젝트명·발주처 검색"
-          />
-        </label>
-        <div
-          className="project-context-results"
-          role="radiogroup"
-          aria-label="프로젝트 후보"
-        >
-          {candidates.map((project) => (
-            <label
-              key={project.id}
-              className={candidateId === project.id ? 'is-selected' : ''}
-            >
-              <input
-                type="radio"
-                name="project-context"
-                value={project.id}
-                checked={candidateId === project.id}
-                onChange={() => onCandidateChange(project.id)}
-              />
-              <span>
-                <strong>{project.name}</strong>
-                <small>{project.clientName || 'ERP 연동 대기'}</small>
-              </span>
-              {currentProject?.id === project.id && <em>현재 선택</em>}
-            </label>
-          ))}
-          {candidates.length === 0 && (
-            <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
+      <div className="project-picker-methods">
+        <section className="project-picker-method">
+          <label className="project-picker-label" htmlFor="project-search">
+            프로젝트 검색
+          </label>
+          <div className="project-context-search">
+            <Search aria-hidden="true" />
+            <input
+              id="project-search"
+              type="search"
+              value={query}
+              aria-controls={
+                query.trim() ? 'project-search-results' : undefined
+              }
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="프로젝트명 또는 발주처 입력"
+            />
+          </div>
+          {query.trim() && (
+            <>
+              <output className="project-search-count" aria-live="polite">
+                검색 결과 {matchingProjects.length}개
+                {matchingProjects.length > 6 ? ' · 상위 6개 표시' : ''}
+              </output>
+              <div
+                id="project-search-results"
+                className="project-context-results"
+                role="radiogroup"
+                aria-label="프로젝트 검색 결과"
+              >
+                {candidates.map((project) => (
+                  <label
+                    key={project.id}
+                    className={candidateId === project.id ? 'is-selected' : ''}
+                  >
+                    <input
+                      type="radio"
+                      name="project-context-search-result"
+                      value={project.id}
+                      checked={candidateId === project.id}
+                      onChange={() => onCandidateChange(project.id)}
+                    />
+                    <span>
+                      <strong>{project.name}</strong>
+                      <small>{project.clientName || 'ERP 연동 대기'}</small>
+                    </span>
+                    {currentProject?.id === project.id && <em>현재 선택</em>}
+                  </label>
+                ))}
+                {candidates.length === 0 && (
+                  <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
+                )}
+              </div>
+            </>
           )}
+        </section>
+
+        <div className="project-picker-divider" aria-hidden="true">
+          또는
         </div>
-        <button
-          className="project-context-confirm"
-          type="button"
-          disabled={!candidate || candidate.id === currentProject?.id}
-          onClick={() => candidate && onConfirmProject(candidate.id)}
-        >
-          {candidate?.id === currentProject?.id
-            ? '선택 완료'
-            : '이 프로젝트로 진행'}
-          <ChevronRight aria-hidden="true" />
-        </button>
+
+        <section className="project-picker-method">
+          <label className="project-picker-label" htmlFor="project-dropdown">
+            전체 프로젝트 목록
+          </label>
+          <select
+            id="project-dropdown"
+            className="project-context-select"
+            value={candidateId}
+            disabled={projects.length === 0}
+            onChange={(event) => onCandidateChange(event.target.value)}
+          >
+            <option value="" disabled>
+              프로젝트를 선택하세요
+            </option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name} · {project.clientName || 'ERP 연동 대기'}
+              </option>
+            ))}
+          </select>
+          <p>등록된 전체 프로젝트를 드롭다운에서 바로 선택할 수 있습니다.</p>
+        </section>
+
+        <section className="project-candidate-summary" aria-live="polite">
+          <div>
+            <span>선택 후보</span>
+            <strong>{candidate?.name || '아직 선택하지 않았습니다.'}</strong>
+            <small>
+              {candidate?.clientName ||
+                (candidate ? 'ERP 연동 대기' : '검색 또는 목록에서 선택')}
+            </small>
+          </div>
+          <button
+            className="project-context-confirm"
+            type="button"
+            disabled={!candidate || candidateIsCurrent}
+            onClick={() => candidate && onConfirmProject(candidate.id)}
+          >
+            {candidateIsCurrent
+              ? '현재 프로젝트로 확정됨'
+              : '이 프로젝트로 진행'}
+            {candidateIsCurrent ? (
+              <Check aria-hidden="true" />
+            ) : (
+              <ChevronRight aria-hidden="true" />
+            )}
+          </button>
+        </section>
       </div>
     </section>
   );

@@ -58,7 +58,53 @@ describe('ReviewStudio', () => {
     expect(
       screen.getByRole('button', { name: '새 프로젝트 등록' }),
     ).toBeVisible();
-    expect(screen.getByText('PROJECT CONTEXT · RAG STATUS')).toBeVisible();
+    expect(screen.getByText('PROJECT SELECTOR · RAG STATUS')).toBeVisible();
+    expect(screen.getByLabelText('전체 프로젝트 목록')).toBeVisible();
+  });
+
+  it('supports both search and dropdown selection without changing the project before confirmation', async () => {
+    const projects = [
+      projectFixture(
+        'P1',
+        'P1 프로젝트',
+        '11111111-1111-4111-8111-111111111111',
+      ),
+      projectFixture(
+        'P2',
+        'P2 프로젝트',
+        '22222222-2222-4222-8222-222222222222',
+      ),
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse(projects);
+      if (url.endsWith('/cases')) return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const p1 = await screen.findByRole('row', { name: /P1 프로젝트/u });
+    fireEvent.click(
+      within(p1).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    await screen.findByText('먼저 팀별 검수 케이스를 만드세요.');
+
+    fireEvent.change(screen.getByLabelText('전체 프로젝트 목록'), {
+      target: { value: projects[1].id },
+    });
+    expect(screen.getByText('프로젝트 변경을 먼저 확정하세요.')).toBeVisible();
+    expect(screen.queryByText('팀별 검수 케이스')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('프로젝트 검색'), {
+      target: { value: 'P2' },
+    });
+    expect(screen.getByText('검색 결과 1개')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '이 프로젝트로 진행' }));
+
+    expect(
+      await screen.findByRole('region', { name: 'P2 프로젝트' }),
+    ).toBeVisible();
+    expect(screen.getByText('팀별 검수 케이스')).toBeVisible();
   });
 
   it('shows an actionable error instead of a blank surface', async () => {
