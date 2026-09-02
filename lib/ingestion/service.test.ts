@@ -18,6 +18,18 @@ const reviewCaseId = '33333333-3333-4333-8333-333333333333';
 const idempotencyKey = 'upload-package-0001';
 
 describe('SourcePackageService', () => {
+  it('lists only the actor-scoped project and review-case packages', async () => {
+    const repository = new CapturingRepository();
+    const service = new SourcePackageService(repository);
+
+    await expect(service.list(projectId, reviewCaseId, actor)).resolves.toEqual(
+      [],
+    );
+    expect(repository.listCalls).toEqual([
+      { projectId, reviewCaseId, actorId: actor.id },
+    ]);
+  });
+
   it('creates opaque upload intents for normalized 산출서와 집계표 declarations', async () => {
     const repository = new CapturingRepository();
     const service = new SourcePackageService(
@@ -237,6 +249,24 @@ describe('SourcePackageService', () => {
 
 class CapturingRepository implements SourcePackageRepository {
   readonly records: NewSourcePackageRecord[] = [];
+  readonly listCalls: Array<{
+    projectId: string;
+    reviewCaseId: string;
+    actorId: string;
+  }> = [];
+
+  listForActor(
+    scopedProjectId: string,
+    scopedReviewCaseId: string,
+    actorId: string,
+  ): Promise<SourcePackageSummary[]> {
+    this.listCalls.push({
+      projectId: scopedProjectId,
+      reviewCaseId: scopedReviewCaseId,
+      actorId,
+    });
+    return Promise.resolve([]);
+  }
 
   create(record: NewSourcePackageRecord): Promise<SourcePackageSummary> {
     this.records.push(record);

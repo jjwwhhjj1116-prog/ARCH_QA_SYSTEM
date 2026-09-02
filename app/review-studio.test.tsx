@@ -104,11 +104,198 @@ describe('ReviewStudio', () => {
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     await screen.findByText('먼저 팀별 검수 케이스를 만드세요.');
-    fireEvent.click(screen.getByRole('button', { name: '마감팀 케이스' }));
+    fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
     expect(
       await screen.findByText('웹 검수 프로젝트 마감 검수 1'),
     ).toBeVisible();
     expect(screen.getByText('초안')).toBeVisible();
+  });
+
+  it('stores source files, verifies the persisted package, and keeps the exact result visible', async () => {
+    const project = projectFixture('P100', '웹 검수 프로젝트');
+    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
+    const packageId = '33333333-3333-4333-8333-333333333333';
+    const uploadId = '44444444-4444-4444-8444-444444444444';
+    const sourceFileId = '55555555-5555-4555-8555-555555555555';
+    const sourceVersionId = '66666666-6666-4666-8666-666666666666';
+    let packageListCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') {
+        return jsonResponse([project]);
+      }
+      if (url === `/api/projects/${project.id}/cases`) {
+        return jsonResponse([reviewCase]);
+      }
+      if (
+        url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse(
+          [
+            sourcePackageFixture({
+              packageId,
+              projectId: project.id,
+              reviewCaseId: reviewCase.id,
+              uploadId,
+              sourceFileId,
+              sourceVersionId,
+              status: 'upload_pending',
+            }),
+          ][0],
+          201,
+        );
+      }
+      if (
+        url ===
+        `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
+      ) {
+        packageListCalls += 1;
+        return jsonResponse(
+          packageListCalls === 1
+            ? []
+            : [
+                sourcePackageFixture({
+                  packageId,
+                  projectId: project.id,
+                  reviewCaseId: reviewCase.id,
+                  uploadId,
+                  sourceFileId,
+                  sourceVersionId,
+                  status: 'stored',
+                }),
+              ],
+        );
+      }
+      if (url === `/api/uploads/${uploadId}/bytes`) {
+        return jsonResponse({
+          uploadId,
+          packageId,
+          sourceVersionId,
+          filename: '내부산출서.csv',
+          status: 'stored',
+          packageStatus: 'stored_unverified',
+          projectIdentityStatus: 'pending',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 20,
+          warnings: [],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    const registerButton = await screen.findByRole('button', {
+      name: '산출서와 집계표 등록',
+    });
+    fireEvent.click(registerButton);
+    expect(
+      await screen.findByText(
+        '이 팀에 저장된 산출서와 집계표가 아직 없습니다.',
+      ),
+    ).toBeVisible();
+    const file = new File(['a,b\nc,1\n'], '내부산출서.csv', {
+      type: 'text/csv',
+    });
+    fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+      target: { files: [file] },
+    });
+    const submitUpload = screen.getByRole('button', {
+      name: '원본 검사 후 저장',
+    });
+    await waitFor(() => expect(submitUpload).toBeEnabled());
+    fireEvent.submit(submitUpload.closest('form')!);
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('.source-upload-progress'),
+      ).toHaveTextContent(
+        '1/1개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.',
+      ),
+    );
+    expect(screen.getByText('원본 저장 완료')).toBeVisible();
+    expect(screen.getByText('1/1개 저장 ·', { exact: false })).toBeVisible();
+    expect(screen.getByText('내부산출서.csv')).toBeVisible();
+    expect(packageListCalls).toBe(2);
+  });
+
+  it('keeps a failed source selection retryable and reports the exact saved count', async () => {
+    const project = projectFixture('P100', '웹 검수 프로젝트');
+    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
+    const packageSummary = sourcePackageFixture({
+      projectId: project.id,
+      reviewCaseId: reviewCase.id,
+      status: 'upload_pending',
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url === `/api/projects/${project.id}/cases`)
+        return jsonResponse([reviewCase]);
+      if (
+        url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
+        init?.method === 'POST'
+      )
+        return jsonResponse(packageSummary, 201);
+      if (
+        url ===
+        `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
+      )
+        return jsonResponse([]);
+      if (url === `/api/uploads/${packageSummary.files[0].uploadId}/bytes`) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'UPLOAD_FAILED',
+              message: '원본 저장소에 연결하지 못했습니다.',
+              requestId: 'r-upload',
+            },
+          }),
+          { status: 503 },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
+    );
+    await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
+    const file = new File(['a,b\nc,1\n'], '내부산출서.csv', {
+      type: 'text/csv',
+    });
+    fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+      target: { files: [file] },
+    });
+    const retryableSubmit = screen.getByRole('button', {
+      name: '원본 검사 후 저장',
+    });
+    await waitFor(() => expect(retryableSubmit).toBeEnabled());
+    fireEvent.submit(retryableSubmit.closest('form')!);
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('.source-upload-progress'),
+      ).toHaveTextContent('0/1개 서버 저장 확인'),
+    );
+    expect(
+      screen.getByText('원본 저장소에 연결하지 못했습니다.'),
+    ).toBeVisible();
+    expect(screen.getByText('내부산출서.csv')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '원본 검사 후 다시 저장' }),
+    ).toBeEnabled();
   });
 
   it('exposes expandable structure and finish analysis groups', async () => {
@@ -208,6 +395,12 @@ function requestUrl(input: RequestInfo | URL) {
       : input;
 }
 
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify({ data, requestId: 'req-test' }), {
+    status,
+  });
+}
+
 function projectFixture(code: string, name: string, id = crypto.randomUUID()) {
   return {
     id,
@@ -231,5 +424,50 @@ function caseFixture(projectId: string, name: string) {
     status: 'draft' as const,
     ownerId: 'local-user-owner',
     createdAt: new Date().toISOString(),
+  };
+}
+
+function sourcePackageFixture({
+  packageId = '33333333-3333-4333-8333-333333333333',
+  projectId,
+  reviewCaseId,
+  uploadId = '44444444-4444-4444-8444-444444444444',
+  sourceFileId = '55555555-5555-4555-8555-555555555555',
+  sourceVersionId = '66666666-6666-4666-8666-666666666666',
+  sizeBytes = 8,
+  status,
+}: {
+  packageId?: string;
+  projectId: string;
+  reviewCaseId: string;
+  uploadId?: string;
+  sourceFileId?: string;
+  sourceVersionId?: string;
+  sizeBytes?: number;
+  status: 'upload_pending' | 'stored';
+}) {
+  return {
+    id: packageId,
+    projectId,
+    reviewCaseId,
+    displayName: '웹 검수 프로젝트 산출서와 집계표',
+    status:
+      status === 'stored'
+        ? ('stored_unverified' as const)
+        : ('receiving' as const),
+    projectIdentityStatus: 'pending' as const,
+    files: [
+      {
+        uploadId,
+        sourceFileId,
+        sourceVersionId,
+        filename: '내부산출서.csv',
+        format: 'csv' as const,
+        documentKind: 'takeoff' as const,
+        sizeBytes,
+        status,
+      },
+    ],
+    createdAt: '2026-09-02T00:00:00.000Z',
   };
 }

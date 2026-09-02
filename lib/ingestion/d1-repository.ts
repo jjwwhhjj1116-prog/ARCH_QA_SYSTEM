@@ -43,6 +43,8 @@ type ExistingFileRow = {
   size_bytes: number;
 };
 
+type ListedPackageRow = Omit<ExistingPackageRow, 'request_hash'>;
+
 type UploadRow = {
   upload_id: string;
   project_id: string;
@@ -82,6 +84,94 @@ const UPLOAD_CLAIM_LEASE_MS = 5 * 60 * 1_000;
 export class D1SourcePackageRepository
   implements SourcePackageRepository, SourceUploadRepository
 {
+  async listForActor(
+    projectId: string,
+    reviewCaseId: string,
+    actorId: string,
+  ): Promise<SourcePackageSummary[]> {
+    const binding = getD1Binding();
+    const [membershipRaw, packagesRaw, filesRaw] = await binding.batch([
+      binding
+        .prepare(
+          `SELECT role
+           FROM project_member
+           WHERE project_id = ? AND user_id = ?
+           LIMIT 1`,
+        )
+        .bind(projectId, actorId),
+      binding
+        .prepare(
+          `SELECT sp.id, sp.project_id, sp.review_case_id, sp.display_name,
+                  sp.status, sp.project_identity_status, sp.created_at
+           FROM source_package sp
+           INNER JOIN review_case rc ON rc.id = sp.review_case_id
+           INNER JOIN project p ON p.id = sp.project_id
+           INNER JOIN project_member pm ON pm.project_id = sp.project_id
+           WHERE sp.project_id = ? AND sp.review_case_id = ?
+             AND rc.project_id = sp.project_id AND pm.user_id = ?
+             AND p.status = 'active' AND rc.status <> 'archived'
+           ORDER BY sp.created_at DESC, sp.id DESC`,
+        )
+        .bind(projectId, reviewCaseId, actorId),
+      binding
+        .prepare(
+          `SELECT sp.id AS package_id, ua.id AS upload_id,
+                  sf.id AS source_file_id, sfv.id AS source_version_id,
+                  sfv.original_filename, sfv.extension_claimed,
+                  sf.declared_document_kind, sfv.status, sfv.size_bytes
+           FROM source_package sp
+           INNER JOIN review_case rc ON rc.id = sp.review_case_id
+           INNER JOIN project p ON p.id = sp.project_id
+           INNER JOIN project_member pm ON pm.project_id = sp.project_id
+           INNER JOIN source_file sf ON sf.package_id = sp.id
+           INNER JOIN source_file_version sfv ON sfv.source_file_id = sf.id
+           INNER JOIN upload_attempt ua ON ua.source_file_version_id = sfv.id
+           WHERE sp.project_id = ? AND sp.review_case_id = ?
+             AND rc.project_id = sp.project_id AND pm.user_id = ?
+             AND p.status = 'active' AND rc.status <> 'archived'
+             AND sfv.version_number = (
+               SELECT MAX(latest_version.version_number)
+               FROM source_file_version latest_version
+               WHERE latest_version.source_file_id = sf.id
+             )
+             AND ua.id = (
+               SELECT latest_attempt.id FROM upload_attempt latest_attempt
+               WHERE latest_attempt.source_file_version_id = sfv.id
+               ORDER BY latest_attempt.created_at DESC, latest_attempt.id DESC
+               LIMIT 1
+             )
+           ORDER BY sp.created_at DESC, sp.id DESC, sf.display_name, sf.id`,
+        )
+        .bind(projectId, reviewCaseId, actorId),
+    ]);
+    const membership = membershipRaw as D1Result<{ role: string }>;
+    if ((membership.results?.length ?? 0) === 0) {
+      throw new SourcePackageAccessError(
+        '이 프로젝트의 산출서와 집계표를 볼 권한이 없습니다.',
+      );
+    }
+    const filesByPackage = new Map<string, SourceUploadIntentSummary[]>();
+    for (const row of (
+      filesRaw as D1Result<ExistingFileRow & { package_id: string }>
+    ).results ?? []) {
+      const files = filesByPackage.get(row.package_id) ?? [];
+      files.push(fileSummary(row));
+      filesByPackage.set(row.package_id, files);
+    }
+    return ((packagesRaw as D1Result<ListedPackageRow>).results ?? []).map(
+      (row) => ({
+        id: row.id,
+        projectId: row.project_id,
+        reviewCaseId: row.review_case_id,
+        displayName: row.display_name,
+        status: row.status,
+        projectIdentityStatus: row.project_identity_status,
+        files: filesByPackage.get(row.id) ?? [],
+        createdAt: new Date(row.created_at).toISOString(),
+      }),
+    );
+  }
+
   async create(record: NewSourcePackageRecord): Promise<SourcePackageSummary> {
     const existing = await this.loadExisting(record);
     if (existing) return existing;

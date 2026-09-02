@@ -27,6 +27,11 @@ export type NewSourcePackageRecord = {
 };
 
 export interface SourcePackageRepository {
+  listForActor(
+    projectId: string,
+    reviewCaseId: string,
+    actorId: string,
+  ): Promise<SourcePackageSummary[]>;
   create(record: NewSourcePackageRecord): Promise<SourcePackageSummary>;
 }
 

@@ -23,6 +23,14 @@ export class SourcePackageService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  list(
+    projectId: string,
+    reviewCaseId: string,
+    actor: Actor,
+  ): Promise<SourcePackageSummary[]> {
+    return this.repository.listForActor(projectId, reviewCaseId, actor.id);
+  }
+
   async create(
     projectId: string,
     reviewCaseId: string,

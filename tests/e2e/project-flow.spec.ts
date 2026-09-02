@@ -91,7 +91,7 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(
     page.getByText('먼저 팀별 검수 케이스를 만드세요.', { exact: true }),
   ).toBeVisible();
-  const addFinishCase = page.getByRole('button', { name: '마감팀 케이스' });
+  const addFinishCase = page.getByRole('button', { name: '마감팀' });
   await expect(addFinishCase).toBeEnabled();
   await addFinishCase.click();
   await expect(
@@ -117,8 +117,10 @@ test('project page exposes the full Korean workflow and persists a new project',
   ).toBeVisible();
   await page.getByRole('button', { name: '원본 검사 후 저장' }).click();
   await expect(page.locator('.system-message')).toContainText(
-    '2개 산출서와 집계표를 저장했습니다',
+    '2개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다',
   );
+  await expect(page.getByText('원본 저장 완료')).toBeVisible();
+  await expect(page.getByText('2/2개 저장', { exact: false })).toBeVisible();
   const selectedResults = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();

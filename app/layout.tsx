@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import './qto-studio.css';
+import './claim-center-theme.css';
 
 export const metadata: Metadata = {
   title: 'CONCOST 기술본부 QC 스튜디오',
@@ -21,8 +22,8 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body
-        data-design-contract="high-tech-dark-glass"
-        data-design-seed="9f1a8b94"
+        data-design-contract="claim-center-workspace"
+        data-design-seed="concost-qc-2026"
       >
         {children}
       </body>

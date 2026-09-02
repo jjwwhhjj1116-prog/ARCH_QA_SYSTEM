@@ -27,6 +27,7 @@ import type {
 } from '@/lib/domain/contracts';
 import { canonicalSourceFilename } from '@/lib/imports/source-filename';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
+import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ProjectRegistrationWorkspace } from './project-registration-workspace';
 import {
@@ -38,6 +39,7 @@ import {
 
 type LoadState = 'loading' | 'ready' | 'error';
 type MessageTone = 'neutral' | 'success' | 'error';
+type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 
 type ReviewStudioProps = {
   currentUser: { displayName: string; email: string };
@@ -71,7 +73,16 @@ export function ReviewStudio({
   const [sourceFiles, setSourceFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
+  const [uploadCompletedCount, setUploadCompletedCount] = useState(0);
+  const [sourcePackages, setSourcePackages] = useState<SourcePackageSummary[]>(
+    [],
+  );
+  const [sourcePackageState, setSourcePackageState] =
+    useState<LoadState>('ready');
+  const [sourcePackageError, setSourcePackageError] = useState('');
   const uploadKeyRef = useRef<string | null>(null);
+  const sourcePackageScopeRef = useRef<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const primarySidebarRef = useRef<HTMLElement>(null);
@@ -98,7 +109,13 @@ export function ReviewStudio({
       setUploadCaseId(null);
       setSourceFiles([]);
       setUploadProgress('');
+      setUploadStatus('idle');
+      setUploadCompletedCount(0);
+      setSourcePackages([]);
+      setSourcePackageState('ready');
+      setSourcePackageError('');
       uploadKeyRef.current = null;
+      sourcePackageScopeRef.current = null;
     }
     setActiveView('project-data');
   }, []);
@@ -281,11 +298,58 @@ export function ReviewStudio({
     }
   }
 
+  const loadSourcePackages = useCallback(
+    async (
+      projectId: string,
+      reviewCaseId: string,
+    ): Promise<SourcePackageSummary[] | null> => {
+      const scope = `${projectId}:${reviewCaseId}`;
+      sourcePackageScopeRef.current = scope;
+      setSourcePackageState('loading');
+      setSourcePackageError('');
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/cases/${reviewCaseId}/source-packages`,
+          { cache: 'no-store' },
+        );
+        const body = (await response.json()) as
+          | ApiSuccessEnvelope<SourcePackageSummary[]>
+          | ApiErrorEnvelope;
+        if (!response.ok || 'error' in body) {
+          throw new Error(
+            'error' in body
+              ? body.error.message
+              : '저장된 자료 묶음을 불러오지 못했습니다.',
+          );
+        }
+        if (sourcePackageScopeRef.current !== scope) return null;
+        setSourcePackages(body.data);
+        setSourcePackageState('ready');
+        return body.data;
+      } catch (error) {
+        if (sourcePackageScopeRef.current !== scope) return null;
+        setSourcePackages([]);
+        setSourcePackageState('error');
+        setSourcePackageError(
+          error instanceof Error
+            ? error.message
+            : '저장된 자료 묶음을 불러오지 못했습니다.',
+        );
+        return null;
+      }
+    },
+    [],
+  );
+
   function openSourceUpload(reviewCaseId: string) {
+    if (!selectedProject) return;
     uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
     setUploadCaseId(reviewCaseId);
     setSourceFiles([]);
+    setUploadStatus('idle');
+    setUploadCompletedCount(0);
     setUploadProgress('등록할 산출서와 집계표를 선택하세요.');
+    void loadSourcePackages(selectedProject.id, reviewCaseId);
   }
 
   function closeSourceUpload() {
@@ -294,6 +358,24 @@ export function ReviewStudio({
     setUploadCaseId(null);
     setSourceFiles([]);
     setUploadProgress('');
+    setUploadStatus('idle');
+    setUploadCompletedCount(0);
+    setSourcePackages([]);
+    setSourcePackageState('ready');
+    setSourcePackageError('');
+    sourcePackageScopeRef.current = null;
+  }
+
+  function changeSourceFiles(files: File[]) {
+    setSourceFiles(files);
+    setUploadStatus('idle');
+    setUploadCompletedCount(0);
+    setUploadProgress(
+      files.length === 0
+        ? '등록할 산출서와 집계표를 선택하세요.'
+        : `${files.length}개 파일을 선택했습니다. 저장 전 원본 검사를 실행합니다.`,
+    );
+    uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
   }
 
   async function uploadSources(
@@ -323,11 +405,18 @@ export function ReviewStudio({
     const idempotencyKey =
       uploadKeyRef.current ?? `source-package-${crypto.randomUUID()}`;
     uploadKeyRef.current = idempotencyKey;
+    const targetProjectId = selectedProject.id;
+    const targetCaseId = uploadCaseId;
+    const total = canonicalFiles.length;
+    let completed = 0;
+    let packageId: string | null = null;
     setUploading(true);
+    setUploadStatus('uploading');
+    setUploadCompletedCount(0);
     try {
       setUploadProgress('파일 등록 공간과 감사 계보를 준비하는 중…');
       const packageResponse = await fetch(
-        `/api/projects/${selectedProject.id}/cases/${uploadCaseId}/source-packages`,
+        `/api/projects/${targetProjectId}/cases/${targetCaseId}/source-packages`,
         {
           method: 'POST',
           headers: {
@@ -355,14 +444,16 @@ export function ReviewStudio({
             : '자료 등록 공간을 만들지 못했습니다.',
         );
       }
+      packageId = packageBody.data.id;
       const filesByKey = new Map(
         canonicalFiles.map(
           ({ file, name }) => [`${name}\u0000${file.size}`, file] as const,
         ),
       );
-      let completed = packageBody.data.files.filter(
+      completed = packageBody.data.files.filter(
         (file) => file.status === 'stored',
       ).length;
+      setUploadCompletedCount(completed);
       for (const intent of packageBody.data.files) {
         if (intent.status === 'stored') continue;
         const file = filesByKey.get(
@@ -371,7 +462,7 @@ export function ReviewStudio({
         if (!file)
           throw new Error(`${intent.filename} 원본 파일을 다시 선택해 주세요.`);
         setUploadProgress(
-          `${intent.filename} 검사·저장 중 (${completed + 1}/${sourceFiles.length})`,
+          `${intent.filename} 검사·저장 중 (${completed + 1}/${total})`,
         );
         const response = await fetch(`/api/uploads/${intent.uploadId}/bytes`, {
           method: 'PUT',
@@ -379,7 +470,7 @@ export function ReviewStudio({
           body: file,
         });
         const body = (await response.json()) as
-          | ApiSuccessEnvelope<unknown>
+          | ApiSuccessEnvelope<StoredUploadSummary>
           | ApiErrorEnvelope;
         if (!response.ok || 'error' in body) {
           throw new Error(
@@ -389,19 +480,45 @@ export function ReviewStudio({
           );
         }
         completed += 1;
+        setUploadCompletedCount(completed);
       }
-      setUploadProgress(`${completed}개 파일의 원본·해시·계보를 저장했습니다.`);
+      const persistedPackages = await loadSourcePackages(
+        targetProjectId,
+        targetCaseId,
+      );
+      const persistedPackage = persistedPackages?.find(
+        (item) => item.id === packageBody.data.id,
+      );
+      const persistedCount =
+        persistedPackage?.files.filter((file) => file.status === 'stored')
+          .length ?? 0;
+      if (!persistedPackage || persistedCount !== total) {
+        throw new Error(
+          `${completed}/${total}개 저장 응답을 받았지만 서버 목록에서는 ${persistedCount}개만 확인했습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.`,
+        );
+      }
+      setUploadProgress(
+        `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
+      );
+      setUploadStatus('success');
       setMessageTone('success');
       setMessage(
-        `${completed}개 산출서와 집계표를 저장했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
+        `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
       );
-      uploadKeyRef.current = null;
-      window.setTimeout(() => {
-        setUploadCaseId(null);
-        setSourceFiles([]);
-        setUploadProgress('');
-      }, 800);
+      setSourceFiles([]);
+      uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
     } catch (error) {
+      const persistedPackages = packageId
+        ? await loadSourcePackages(targetProjectId, targetCaseId)
+        : null;
+      const persistedCount = packageId
+        ? (persistedPackages
+            ?.find((item) => item.id === packageId)
+            ?.files.filter((file) => file.status === 'stored').length ?? 0)
+        : 0;
+      const confirmedCount = persistedPackages ? persistedCount : completed;
+      setUploadStatus('error');
+      setUploadCompletedCount(confirmedCount);
       setMessageTone('error');
       setMessage(
         error instanceof Error
@@ -409,7 +526,9 @@ export function ReviewStudio({
           : '산출서와 집계표를 저장하지 못했습니다.',
       );
       setUploadProgress(
-        '중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.',
+        persistedPackages
+          ? `${persistedCount}/${total}개 서버 저장 확인 · 중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.`
+          : `${completed}/${total}개 저장 응답 · 서버 목록 재확인에 실패했습니다. 목록을 다시 불러온 뒤 재시도하세요.`,
       );
     } finally {
       setUploading(false);
@@ -658,6 +777,11 @@ export function ReviewStudio({
               sourceFiles={sourceFiles}
               uploading={uploading}
               uploadProgress={uploadProgress}
+              uploadStatus={uploadStatus}
+              uploadCompletedCount={uploadCompletedCount}
+              sourcePackages={sourcePackages}
+              sourcePackageState={sourcePackageState}
+              sourcePackageError={sourcePackageError}
               message={message}
               messageTone={messageTone}
               onOpenRegistration={() => navigate('project-register')}
@@ -665,7 +789,12 @@ export function ReviewStudio({
               onCreateCase={(discipline) => void createReviewCase(discipline)}
               onOpenUpload={openSourceUpload}
               onCloseUpload={closeSourceUpload}
-              onFilesChange={setSourceFiles}
+              onFilesChange={changeSourceFiles}
+              onRetryPackages={() => {
+                if (selectedProject && uploadCaseId) {
+                  void loadSourcePackages(selectedProject.id, uploadCaseId);
+                }
+              }}
               onUpload={(event) => void uploadSources(event)}
             />
           ) : (

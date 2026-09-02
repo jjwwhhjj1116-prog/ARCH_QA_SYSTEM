@@ -33,6 +33,29 @@ type RouteContext = {
   params: Promise<{ projectId: string; caseId: string }>;
 };
 
+export async function GET(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  const requestId = requestIdFrom(request.headers);
+  try {
+    const params = await context.params;
+    const projectId = opaqueIdSchema.parse(params.projectId);
+    const caseId = opaqueIdSchema.parse(params.caseId);
+    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+      allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
+    });
+    const data = await service.list(projectId, caseId, actor);
+    const body: ApiSuccessEnvelope<typeof data> = { data, requestId };
+    return Response.json(body, {
+      status: 200,
+      headers: { 'cache-control': 'no-store', 'x-request-id': requestId },
+    });
+  } catch (error) {
+    return failure(error, requestId);
+  }
+}
+
 export async function POST(
   request: Request,
   context: RouteContext,
