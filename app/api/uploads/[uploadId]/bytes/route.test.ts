@@ -8,6 +8,9 @@ vi.mock('@/lib/ingestion/upload-service', () => ({
   },
 }));
 vi.mock('@/lib/files/r2-factory', () => ({
+  FileStorageUnavailableError: class FileStorageUnavailableError extends Error {
+    readonly code = 'FILE_STORAGE_UNAVAILABLE';
+  },
   getPrivateFileStorage: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/ingestion/d1-repository', () => ({

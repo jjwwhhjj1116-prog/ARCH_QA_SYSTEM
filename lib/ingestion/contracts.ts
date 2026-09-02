@@ -46,6 +46,15 @@ export type SourceUploadIntentSummary = {
     | 'stored'
     | 'rejected'
     | 'deleted';
+  uploadState?:
+    | 'created'
+    | 'uploading'
+    | 'uploaded'
+    | 'finalizing'
+    | 'finalized'
+    | 'failed'
+    | 'expired';
+  errorCode?: string | null;
 };
 
 export type SourcePackageSummary = {

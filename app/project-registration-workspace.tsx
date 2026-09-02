@@ -9,9 +9,10 @@ import {
   FileSpreadsheet,
   Plus,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
-import type { SyntheticEvent } from 'react';
+import { type SyntheticEvent, useEffect, useRef, useState } from 'react';
 import type { ProjectSummary } from '@/lib/domain/contracts';
 
 type Props = {
@@ -22,6 +23,7 @@ type Props = {
   messageTone: 'neutral' | 'success' | 'error';
   showCreate: boolean;
   submitting: boolean;
+  archivingProjectId: string | null;
   query: string;
   onQueryChange: (value: string) => void;
   onToggleCreate: () => void;
@@ -30,6 +32,10 @@ type Props = {
     event: SyntheticEvent<HTMLFormElement, SubmitEvent>,
   ) => void;
   onSelectAndContinue: (projectId: string) => void;
+  onArchiveProject: (
+    project: ProjectSummary,
+    confirmationName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 };
 
 export function ProjectRegistrationWorkspace({
@@ -40,13 +46,35 @@ export function ProjectRegistrationWorkspace({
   messageTone,
   showCreate,
   submitting,
+  archivingProjectId,
   query,
   onQueryChange,
   onToggleCreate,
   onRetry,
   onCreateProject,
   onSelectAndContinue,
+  onArchiveProject,
 }: Props) {
+  const archiveDialogRef = useRef<HTMLDialogElement>(null);
+  const [archiveTarget, setArchiveTarget] = useState<ProjectSummary | null>(
+    null,
+  );
+  const [confirmationName, setConfirmationName] = useState('');
+  const [archiveError, setArchiveError] = useState('');
+
+  useEffect(() => {
+    if (archiveTarget && !archiveDialogRef.current?.open) {
+      archiveDialogRef.current?.showModal();
+    }
+  }, [archiveTarget]);
+
+  function closeArchiveDialog() {
+    archiveDialogRef.current?.close();
+    setArchiveTarget(null);
+    setConfirmationName('');
+    setArchiveError('');
+  }
+
   return (
     <section
       className="project-workspace stage-workspace"
@@ -201,6 +229,7 @@ export function ProjectRegistrationWorkspace({
                 <th scope="col">진행 검수</th>
                 <th scope="col">확인 필요</th>
                 <th scope="col">다음 단계</th>
+                <th scope="col">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -232,6 +261,22 @@ export function ProjectRegistrationWorkspace({
                       선택하고 자료 등록 <ChevronRight aria-hidden="true" />
                     </button>
                   </td>
+                  <td>
+                    {(project.role === 'workspace_admin' ||
+                      project.role === 'project_owner') && (
+                      <button
+                        className="project-archive-action"
+                        type="button"
+                        disabled={archivingProjectId === project.id}
+                        onClick={() => setArchiveTarget(project)}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        {archivingProjectId === project.id
+                          ? '보관 중…'
+                          : '프로젝트 삭제'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -243,6 +288,99 @@ export function ProjectRegistrationWorkspace({
           )}
         </div>
       )}
+
+      <dialog
+        ref={archiveDialogRef}
+        className="archive-project-dialog"
+        aria-labelledby="archive-project-title"
+        onCancel={(event) => {
+          event.preventDefault();
+          if (archiveTarget && archivingProjectId === archiveTarget.id) return;
+          closeArchiveDialog();
+        }}
+        onClose={() => {
+          setArchiveTarget(null);
+          setConfirmationName('');
+          setArchiveError('');
+        }}
+      >
+        {archiveTarget && (
+          <form
+            method="dialog"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (confirmationName !== archiveTarget.name) return;
+              setArchiveError('');
+              const result = await onArchiveProject(
+                archiveTarget,
+                confirmationName,
+              );
+              if (result.ok) closeArchiveDialog();
+              else setArchiveError(result.message);
+            }}
+          >
+            <div className="dialog-heading">
+              <div>
+                <span className="panel-kicker">PROJECT ARCHIVE</span>
+                <h2 id="archive-project-title">
+                  프로젝트를 목록에서 삭제할까요?
+                </h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="프로젝트 삭제 창 닫기"
+                disabled={archivingProjectId === archiveTarget.id}
+                onClick={closeArchiveDialog}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+            <p>
+              원본 자료와 검수 이력은 지우지 않고 안전하게 보관합니다.
+              계속하려면 아래에 <strong>{archiveTarget.name}</strong>을 정확히
+              입력하세요.
+            </p>
+            <label>
+              프로젝트명 확인
+              <input
+                autoFocus
+                value={confirmationName}
+                onChange={(event) => setConfirmationName(event.target.value)}
+                placeholder={archiveTarget.name}
+              />
+            </label>
+            {archiveError && (
+              <p className="archive-project-error" role="alert">
+                <AlertTriangle aria-hidden="true" /> {archiveError}
+              </p>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={archivingProjectId === archiveTarget.id}
+                onClick={closeArchiveDialog}
+              >
+                취소
+              </button>
+              <button
+                type="submit"
+                className="danger-action"
+                disabled={
+                  confirmationName !== archiveTarget.name ||
+                  archivingProjectId === archiveTarget.id
+                }
+              >
+                <Trash2 aria-hidden="true" />
+                {archivingProjectId === archiveTarget.id
+                  ? '프로젝트 삭제 중…'
+                  : '프로젝트 삭제'}
+              </button>
+            </div>
+          </form>
+        )}
+      </dialog>
     </section>
   );
 }

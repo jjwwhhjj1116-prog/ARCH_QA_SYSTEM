@@ -3,17 +3,20 @@
 import {
   AlertTriangle,
   Check,
+  ChevronRight,
   FileSpreadsheet,
   Plus,
+  Search,
   Upload,
   X,
 } from 'lucide-react';
-import type { SyntheticEvent } from 'react';
+import { type SyntheticEvent, useMemo, useState } from 'react';
 import type { ProjectSummary, ReviewCaseSummary } from '@/lib/domain/contracts';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import { StageHeading } from './project-registration-workspace';
 
 type Props = {
+  projects: ProjectSummary[];
   selectedProject: ProjectSummary | null;
   reviewCases: ReviewCaseSummary[];
   caseState: 'loading' | 'ready' | 'error';
@@ -25,12 +28,19 @@ type Props = {
   uploadProgress: string;
   uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
   uploadCompletedCount: number;
+  uploadFailures: Array<{
+    filename: string;
+    code: string;
+    message: string;
+    requestId?: string;
+  }>;
   sourcePackages: SourcePackageSummary[];
   sourcePackageState: 'loading' | 'ready' | 'error';
   sourcePackageError: string;
   message: string;
   messageTone: 'neutral' | 'success' | 'error';
   onOpenRegistration: () => void;
+  onConfirmProject: (projectId: string) => void;
   onRetryCases: () => void;
   onCreateCase: (discipline: 'FIN' | 'RC') => void;
   onOpenUpload: (caseId: string) => void;
@@ -41,6 +51,7 @@ type Props = {
 };
 
 export function ProjectDataWorkspace({
+  projects,
   selectedProject,
   reviewCases,
   caseState,
@@ -52,12 +63,14 @@ export function ProjectDataWorkspace({
   uploadProgress,
   uploadStatus,
   uploadCompletedCount,
+  uploadFailures,
   sourcePackages,
   sourcePackageState,
   sourcePackageError,
   message,
   messageTone,
   onOpenRegistration,
+  onConfirmProject,
   onRetryCases,
   onCreateCase,
   onOpenUpload,
@@ -66,25 +79,14 @@ export function ProjectDataWorkspace({
   onRetryPackages,
   onUpload,
 }: Props) {
-  if (!selectedProject) {
-    return (
-      <section className="module-empty-state" data-stage="data">
-        <FileSpreadsheet aria-hidden="true" />
-        <div>
-          <span className="panel-kicker">2 / 5 · 프로젝트 자료</span>
-          <h1>프로젝트를 먼저 선택하세요</h1>
-          <p>1단계에서 프로젝트를 선택한 뒤 산출서와 집계표를 등록합니다.</p>
-        </div>
-        <button
-          className="primary-action"
-          type="button"
-          onClick={onOpenRegistration}
-        >
-          프로젝트 등록으로 이동
-        </button>
-      </section>
-    );
-  }
+  const [candidateProjectId, setCandidateProjectId] = useState(
+    selectedProject?.id ?? '',
+  );
+  const projectChangePending = Boolean(
+    selectedProject &&
+    candidateProjectId &&
+    candidateProjectId !== selectedProject.id,
+  );
 
   return (
     <section
@@ -95,7 +97,11 @@ export function ProjectDataWorkspace({
       <StageHeading
         eyebrow="2 / 5 · 프로젝트 자료"
         title="산출서와 집계표를 등록하세요"
-        description={`${selectedProject.name} 전용 검수 케이스와 원본 자료만 표시합니다.`}
+        description={
+          selectedProject
+            ? `${selectedProject.name} 전용 검수 케이스와 원본 자료만 표시합니다.`
+            : '프로젝트를 검색하고 확정한 뒤 해당 프로젝트에만 원본을 등록합니다.'
+        }
         action={
           <button
             className="secondary-action"
@@ -116,248 +122,451 @@ export function ProjectDataWorkspace({
         <span>{message}</span>
       </output>
 
-      <section
-        className="selected-project"
-        aria-labelledby="selected-project-title"
-      >
-        <div className="selected-project-summary">
-          <span className="selection-label">선택한 프로젝트</span>
-          <h2 id="selected-project-title">{selectedProject.name}</h2>
-          <p>{selectedProject.clientName || 'ERP 연동 대기'}</p>
-        </div>
-        <ol className="compact-readiness">
-          <li className="is-complete">
-            <Check aria-hidden="true" />
-            <span>
-              <strong>프로젝트 경계</strong>
-              <small>프로젝트 ID와 역할 확인</small>
-            </span>
-          </li>
-          <li className="is-complete">
-            <Check aria-hidden="true" />
-            <span>
-              <strong>원본 계보</strong>
-              <small>해시·형식·압축 구조 검사</small>
-            </span>
-          </li>
-          <li>
-            <span className="step-number">3</span>
-            <span>
-              <strong>AI 검수</strong>
-              <small>자료 등록 후 실행 가능</small>
-            </span>
-          </li>
-        </ol>
+      <ProjectContextSelector
+        projects={projects}
+        currentProject={selectedProject}
+        candidateId={candidateProjectId}
+        onCandidateChange={setCandidateProjectId}
+        onConfirmProject={onConfirmProject}
+        onOpenRegistration={onOpenRegistration}
+      />
 
-        <div className="case-workbench">
-          <div className="case-heading">
-            <div>
-              <span className="panel-kicker">REVIEW CASE</span>
-              <h3>팀별 검수 케이스</h3>
-              <p>구조팀과 마감팀 자료를 독립 계보로 관리합니다.</p>
-            </div>
-            <div className="case-actions">
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={caseSubmitting || caseState !== 'ready'}
-                onClick={() => onCreateCase('FIN')}
-              >
-                <Plus aria-hidden="true" /> 마감팀
-              </button>
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={caseSubmitting || caseState !== 'ready'}
-                onClick={() => onCreateCase('RC')}
-              >
-                <Plus aria-hidden="true" /> 구조팀
-              </button>
-            </div>
+      {!selectedProject || projectChangePending ? (
+        <section className="project-data-locked" aria-live="polite">
+          <FileSpreadsheet aria-hidden="true" />
+          <div>
+            <h2>
+              {projectChangePending
+                ? '프로젝트 변경을 먼저 확정하세요.'
+                : '프로젝트 확정 후 자료 영역이 열립니다.'}
+            </h2>
+            <p>
+              {projectChangePending
+                ? '후보를 고른 상태에서는 이전 프로젝트에 잘못 저장하지 않도록 자료 영역을 잠급니다.'
+                : '위 검색 결과에서 프로젝트를 고르고 ‘이 프로젝트로 진행’을 누르세요.'}
+            </p>
           </div>
-
-          {caseState === 'loading' ? (
-            <output className="case-empty">검수 케이스를 불러오는 중…</output>
-          ) : caseState === 'error' ? (
-            <div className="case-empty case-error" role="alert">
-              <span>검수 케이스를 불러오지 못했습니다.</span>
-              <button type="button" onClick={onRetryCases}>
-                다시 시도
-              </button>
-            </div>
-          ) : reviewCases.length === 0 ? (
-            <div className="case-empty">
-              <strong>먼저 팀별 검수 케이스를 만드세요.</strong>
-              <span>
-                그 다음 각 케이스에 산출서와 집계표를 등록할 수 있습니다.
-              </span>
-            </div>
-          ) : (
-            <ul className="case-list">
-              {reviewCases.map((reviewCase) => (
-                <li key={reviewCase.id}>
-                  <span className="case-discipline">
-                    {reviewCase.discipline === 'RC' ? '구조팀' : '마감팀'}
-                  </span>
-                  <span>
-                    <strong>{reviewCase.name}</strong>
-                    <small>{caseStatusLabel(reviewCase.status)}</small>
-                  </span>
-                  <button
-                    type="button"
-                    disabled={!canUpload || uploading}
-                    onClick={() => onOpenUpload(reviewCase.id)}
-                  >
-                    산출서와 집계표 등록
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {uploadCaseId && (
-            <form className="source-upload-panel" onSubmit={onUpload}>
-              <div className="source-upload-heading">
-                <div>
-                  <span className="selection-label">프로젝트 자료</span>
-                  <h4>산출서와 집계표 원본 등록</h4>
-                  <p>XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다.</p>
-                </div>
-                <button
-                  className="icon-button"
-                  type="button"
-                  aria-label="자료 등록 닫기"
-                  disabled={uploading}
-                  onClick={onCloseUpload}
-                >
-                  <X aria-hidden="true" />
-                </button>
+        </section>
+      ) : (
+        <section
+          className="selected-project selected-project-workbench"
+          aria-labelledby="selected-project-title"
+        >
+          <header className="selected-project-boundary">
+            <span className="selection-label">현재 자료 저장 대상</span>
+            <h2 id="selected-project-title">{selectedProject.name}</h2>
+            <p>
+              아래에서 등록하는 모든 산출서와 집계표는 이 프로젝트에만
+              저장됩니다.
+            </p>
+          </header>
+          <div className="case-workbench">
+            <div className="case-heading">
+              <div>
+                <span className="panel-kicker">REVIEW CASE</span>
+                <h3>팀별 검수 케이스</h3>
+                <p>구조팀과 마감팀 자료를 독립 계보로 관리합니다.</p>
               </div>
-              <label className="source-file-picker">
-                <Upload aria-hidden="true" />
-                <span>
-                  <strong>산출서와 집계표 선택</strong>
-                  <small>복수 선택 가능 · 파일당 최대 20MB</small>
-                </span>
-                <input
-                  type="file"
-                  accept=".xlsx,.csv"
-                  multiple
-                  required
-                  disabled={uploading}
-                  onChange={(event) =>
-                    onFilesChange(Array.from(event.target.files ?? []))
-                  }
-                />
-              </label>
-              {sourceFiles.length > 0 && (
-                <ul className="source-file-list">
-                  {sourceFiles.map((file) => (
-                    <li key={`${file.name}-${file.size}`}>
-                      <FileSpreadsheet aria-hidden="true" />
-                      <span>{file.name}</span>
-                      <small>{formatBytes(file.size)}</small>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <output
-                className={`source-upload-progress is-${uploadStatus}`}
-                aria-live="polite"
-                aria-busy={uploading}
-              >
-                {uploadProgress}
-              </output>
-              <section
-                className="source-package-history"
-                aria-labelledby="source-package-history-title"
-              >
-                <div className="source-package-history-heading">
-                  <div>
-                    <span className="selection-label">서버 저장 내역</span>
-                    <h5 id="source-package-history-title">등록된 자료 묶음</h5>
-                  </div>
-                  {sourcePackageState === 'ready' && (
-                    <span>{sourcePackages.length}건</span>
-                  )}
-                </div>
-                {sourcePackageState === 'loading' ? (
-                  <output aria-live="polite">저장 내역을 확인하는 중…</output>
-                ) : sourcePackageState === 'error' ? (
-                  <div className="source-package-history-error" role="alert">
-                    <span>{sourcePackageError}</span>
-                    <button type="button" onClick={onRetryPackages}>
-                      저장 내역 다시 불러오기
-                    </button>
-                  </div>
-                ) : sourcePackages.length === 0 ? (
-                  <p>이 팀에 저장된 산출서와 집계표가 아직 없습니다.</p>
-                ) : (
-                  <ul className="source-package-list">
-                    {sourcePackages.map((sourcePackage) => {
-                      const storedCount = sourcePackage.files.filter(
-                        (file) => file.status === 'stored',
-                      ).length;
-                      return (
-                        <li key={sourcePackage.id}>
-                          <div>
-                            <strong>{sourcePackage.displayName}</strong>
-                            <span
-                              className={`package-status ${packageStatusToneClass(sourcePackage.status)}`}
-                            >
-                              {packageStatusLabel(sourcePackage.status)}
-                            </span>
-                            <small>
-                              {storedCount}/{sourcePackage.files.length}개 저장
-                              {' · 등록 시작 '}
-                              {formatRegisteredAt(sourcePackage.createdAt)}
-                              {' · 묶음 '}
-                              {sourcePackage.id.slice(0, 8)}
-                            </small>
-                          </div>
-                          <ul aria-label={`${sourcePackage.displayName} 파일`}>
-                            {sourcePackage.files.map((file) => (
-                              <li key={file.sourceVersionId}>
-                                <span>{file.filename}</span>
-                                <small
-                                  className={`file-status ${uploadFileStatusToneClass(file.status)}`}
-                                >
-                                  {uploadFileStatusLabel(file.status)}
-                                </small>
-                              </li>
-                            ))}
-                          </ul>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-              <div className="form-actions">
+              <div className="case-actions">
                 <button
                   className="secondary-action"
                   type="button"
-                  disabled={uploading}
-                  onClick={onCloseUpload}
+                  disabled={caseSubmitting || caseState !== 'ready'}
+                  onClick={() => onCreateCase('FIN')}
                 >
-                  취소
+                  <Plus aria-hidden="true" /> 마감팀
                 </button>
                 <button
-                  className="primary-action"
-                  type="submit"
-                  disabled={uploading || sourceFiles.length === 0}
+                  className="secondary-action"
+                  type="button"
+                  disabled={caseSubmitting || caseState !== 'ready'}
+                  onClick={() => onCreateCase('RC')}
                 >
-                  {uploading
-                    ? `검사·저장 중 (${uploadCompletedCount}/${sourceFiles.length})`
-                    : uploadStatus === 'error'
-                      ? '원본 검사 후 다시 저장'
-                      : '원본 검사 후 저장'}
+                  <Plus aria-hidden="true" /> 구조팀
                 </button>
               </div>
-            </form>
+            </div>
+
+            {caseState === 'loading' ? (
+              <output className="case-empty">검수 케이스를 불러오는 중…</output>
+            ) : caseState === 'error' ? (
+              <div className="case-empty case-error" role="alert">
+                <span>검수 케이스를 불러오지 못했습니다.</span>
+                <button type="button" onClick={onRetryCases}>
+                  다시 시도
+                </button>
+              </div>
+            ) : reviewCases.length === 0 ? (
+              <div className="case-empty">
+                <strong>먼저 팀별 검수 케이스를 만드세요.</strong>
+                <span>
+                  그 다음 각 케이스에 산출서와 집계표를 등록할 수 있습니다.
+                </span>
+              </div>
+            ) : (
+              <ul className="case-list">
+                {reviewCases.map((reviewCase) => (
+                  <li key={reviewCase.id}>
+                    <span className="case-discipline">
+                      {reviewCase.discipline === 'RC' ? '구조팀' : '마감팀'}
+                    </span>
+                    <span>
+                      <strong>{reviewCase.name}</strong>
+                      <small>{caseStatusLabel(reviewCase.status)}</small>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!canUpload || uploading}
+                      onClick={() => onOpenUpload(reviewCase.id)}
+                    >
+                      산출서와 집계표 등록
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {uploadCaseId && (
+              <form className="source-upload-panel" onSubmit={onUpload}>
+                <div className="source-upload-heading">
+                  <div>
+                    <span className="selection-label">프로젝트 자료</span>
+                    <h4>산출서와 집계표 원본 등록</h4>
+                    <p>
+                      XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다.
+                    </p>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="자료 등록 닫기"
+                    disabled={uploading}
+                    onClick={onCloseUpload}
+                  >
+                    <X aria-hidden="true" />
+                  </button>
+                </div>
+                <label className="source-file-picker">
+                  <Upload aria-hidden="true" />
+                  <span>
+                    <strong>산출서와 집계표 선택</strong>
+                    <small>복수 선택 가능 · 파일당 최대 20MB</small>
+                  </span>
+                  <input
+                    id="source-files"
+                    type="file"
+                    accept=".xlsx,.csv"
+                    multiple
+                    required
+                    disabled={uploading}
+                    onChange={(event) =>
+                      onFilesChange(Array.from(event.target.files ?? []))
+                    }
+                  />
+                </label>
+                {sourceFiles.length > 0 && (
+                  <ul className="source-file-list">
+                    {sourceFiles.map((file) => (
+                      <li key={`${file.name}-${file.size}`}>
+                        <FileSpreadsheet aria-hidden="true" />
+                        <span>{file.name}</span>
+                        <small>{formatBytes(file.size)}</small>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <output
+                  className={`source-upload-progress is-${uploadStatus}`}
+                  aria-live="polite"
+                  aria-busy={uploading}
+                >
+                  {uploadProgress}
+                </output>
+                {uploadFailures.length > 0 && (
+                  <section
+                    className="upload-failure-list"
+                    aria-labelledby="upload-failure-title"
+                    role="alert"
+                    aria-live="assertive"
+                  >
+                    <div>
+                      <AlertTriangle aria-hidden="true" />
+                      <strong id="upload-failure-title">
+                        저장하지 못한 파일
+                      </strong>
+                      <span>{uploadFailures.length}개</span>
+                    </div>
+                    <ul>
+                      {uploadFailures.map((failure) => (
+                        <li key={`${failure.filename}-${failure.code}`}>
+                          <strong>{failure.filename}</strong>
+                          <span>{failure.message}</span>
+                          <small>
+                            {failure.code}
+                            {failure.requestId
+                              ? ` · 요청 ${failure.requestId}`
+                              : ''}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="retry-file-picker" htmlFor="source-files">
+                      실패 파일 다시 선택
+                    </label>
+                  </section>
+                )}
+                <section
+                  className="source-package-history"
+                  aria-labelledby="source-package-history-title"
+                >
+                  <div className="source-package-history-heading">
+                    <div>
+                      <span className="selection-label">서버 저장 내역</span>
+                      <h5 id="source-package-history-title">
+                        등록된 자료 묶음
+                      </h5>
+                    </div>
+                    {sourcePackageState === 'ready' && (
+                      <span>{sourcePackages.length}건</span>
+                    )}
+                  </div>
+                  {sourcePackageState === 'loading' ? (
+                    <output aria-live="polite">저장 내역을 확인하는 중…</output>
+                  ) : sourcePackageState === 'error' ? (
+                    <div className="source-package-history-error" role="alert">
+                      <span>{sourcePackageError}</span>
+                      <button type="button" onClick={onRetryPackages}>
+                        저장 내역 다시 불러오기
+                      </button>
+                    </div>
+                  ) : sourcePackages.length === 0 ? (
+                    <p>이 팀에 저장된 산출서와 집계표가 아직 없습니다.</p>
+                  ) : (
+                    <ul className="source-package-list">
+                      {sourcePackages.map((sourcePackage) => {
+                        const storedCount = sourcePackage.files.filter(
+                          (file) => file.status === 'stored',
+                        ).length;
+                        return (
+                          <li key={sourcePackage.id}>
+                            <div>
+                              <strong>{sourcePackage.displayName}</strong>
+                              <span
+                                className={`package-status ${packageStatusToneClass(sourcePackage.status)}`}
+                              >
+                                {packageStatusLabel(sourcePackage.status)}
+                              </span>
+                              <small>
+                                {storedCount}/{sourcePackage.files.length}개
+                                저장
+                                {' · 등록 시작 '}
+                                {formatRegisteredAt(sourcePackage.createdAt)}
+                                {' · 묶음 '}
+                                {sourcePackage.id.slice(0, 8)}
+                              </small>
+                            </div>
+                            <ul
+                              aria-label={`${sourcePackage.displayName} 파일`}
+                            >
+                              {sourcePackage.files.map((file) => (
+                                <li key={file.sourceVersionId}>
+                                  <span>{file.filename}</span>
+                                  <small
+                                    className={`file-status ${uploadFileStatusToneClass(file.status, file.uploadState)}`}
+                                  >
+                                    {uploadFileStatusLabel(
+                                      file.status,
+                                      file.uploadState,
+                                      file.errorCode,
+                                    )}
+                                  </small>
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+                <div className="form-actions">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={uploading}
+                    onClick={onCloseUpload}
+                  >
+                    취소
+                  </button>
+                  <button
+                    className="primary-action"
+                    type="submit"
+                    disabled={uploading || sourceFiles.length === 0}
+                  >
+                    {uploading
+                      ? `검사·저장 중 (${uploadCompletedCount}/${sourceFiles.length})`
+                      : uploadStatus === 'error'
+                        ? '원본 검사 후 다시 저장'
+                        : '원본 검사 후 저장'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function ProjectContextSelector({
+  projects,
+  currentProject,
+  candidateId,
+  onCandidateChange,
+  onConfirmProject,
+  onOpenRegistration,
+}: {
+  projects: ProjectSummary[];
+  currentProject: ProjectSummary | null;
+  candidateId: string;
+  onCandidateChange: (projectId: string) => void;
+  onConfirmProject: (projectId: string) => void;
+  onOpenRegistration: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const candidates = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    return projects
+      .filter(
+        (project) =>
+          !normalized ||
+          `${project.name} ${project.clientName ?? ''}`
+            .toLocaleLowerCase()
+            .includes(normalized),
+      )
+      .slice(0, 6);
+  }, [projects, query]);
+  const candidate =
+    projects.find((project) => project.id === candidateId) ?? null;
+
+  return (
+    <section
+      className="project-context-panel"
+      aria-labelledby="project-context-title"
+    >
+      <div className="project-context-heading">
+        <div>
+          <span className="panel-kicker">PROJECT CONTEXT · RAG STATUS</span>
+          <h2 id="project-context-title">
+            자료를 저장할 프로젝트를 확정하세요
+          </h2>
+          <p>검색 → 후보 선택 → 프로젝트 경계 확정 순서로 진행합니다.</p>
+        </div>
+        <button
+          className="secondary-action"
+          type="button"
+          onClick={onOpenRegistration}
+        >
+          <Plus aria-hidden="true" /> 새 프로젝트 등록
+        </button>
+      </div>
+
+      <ol
+        className="project-context-rag"
+        aria-label="프로젝트 자료 등록 준비 단계"
+      >
+        <li data-state="done">
+          <Check aria-hidden="true" />
+          <span>
+            <strong>1. 프로젝트 검색</strong>
+            <small>이름·발주처로 찾기</small>
+          </span>
+        </li>
+        <li data-state={candidate ? 'current' : 'waiting'}>
+          <span className="rag-dot" aria-hidden="true" />
+          <span>
+            <strong>2. 후보 선택</strong>
+            <small>{candidate ? candidate.name : '선택 대기'}</small>
+          </span>
+        </li>
+        <li
+          data-state={
+            candidate && candidate.id !== currentProject?.id
+              ? 'current'
+              : currentProject
+                ? 'done'
+                : 'waiting'
+          }
+        >
+          {currentProject && candidate?.id === currentProject.id ? (
+            <Check aria-hidden="true" />
+          ) : (
+            <span className="rag-dot" aria-hidden="true" />
+          )}
+          <span>
+            <strong>3. 경계 확정</strong>
+            <small>
+              {candidate && candidate.id !== currentProject?.id
+                ? '변경 확정 대기'
+                : currentProject
+                  ? '이 프로젝트에만 저장'
+                  : '확정 대기'}
+            </small>
+          </span>
+        </li>
+      </ol>
+
+      <div className="project-context-flow">
+        <label className="project-context-search">
+          <Search aria-hidden="true" />
+          <span className="sr-only">자료를 등록할 프로젝트 검색</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="프로젝트명·발주처 검색"
+          />
+        </label>
+        <div
+          className="project-context-results"
+          role="radiogroup"
+          aria-label="프로젝트 후보"
+        >
+          {candidates.map((project) => (
+            <label
+              key={project.id}
+              className={candidateId === project.id ? 'is-selected' : ''}
+            >
+              <input
+                type="radio"
+                name="project-context"
+                value={project.id}
+                checked={candidateId === project.id}
+                onChange={() => onCandidateChange(project.id)}
+              />
+              <span>
+                <strong>{project.name}</strong>
+                <small>{project.clientName || 'ERP 연동 대기'}</small>
+              </span>
+              {currentProject?.id === project.id && <em>현재 선택</em>}
+            </label>
+          ))}
+          {candidates.length === 0 && (
+            <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
           )}
         </div>
-      </section>
+        <button
+          className="project-context-confirm"
+          type="button"
+          disabled={!candidate || candidate.id === currentProject?.id}
+          onClick={() => candidate && onConfirmProject(candidate.id)}
+        >
+          {candidate?.id === currentProject?.id
+            ? '선택 완료'
+            : '이 프로젝트로 진행'}
+          <ChevronRight aria-hidden="true" />
+        </button>
+      </div>
     </section>
   );
 }
@@ -408,7 +617,25 @@ function packageStatusToneClass(
 
 function uploadFileStatusLabel(
   status: SourcePackageSummary['files'][number]['status'],
+  uploadState?: SourcePackageSummary['files'][number]['uploadState'],
+  errorCode?: string | null,
 ): string {
+  if (uploadState === 'failed') {
+    const safeCode = safeUploadErrorCode(errorCode);
+    const guidance: Record<string, string> = {
+      FILE_XLSX_ACTIVE_CONTENT: '실행 가능한 포함 개체 차단',
+      FILE_SIZE_MISMATCH: '선택 파일 크기 불일치 · 다시 선택 필요',
+      FILE_EMPTY: '빈 파일 차단',
+      FILE_TOO_LARGE: '파일 용량 초과',
+      FILE_SIGNATURE_MISMATCH: '파일 형식·서명 불일치',
+      FILE_EXTENSION_UNSUPPORTED: '지원하지 않는 확장자',
+      UPLOAD_EXPIRED: '등록 시간 만료 · 다시 등록 필요',
+      FILE_STORAGE_UNAVAILABLE: '원본 저장소 일시 중단',
+      INTERNAL_ERROR: '서버 저장 오류',
+    };
+    return `${guidance[safeCode] ?? '저장 실패'} · ${safeCode}`;
+  }
+  if (uploadState === 'expired') return '재등록 필요';
   return {
     upload_pending: '저장 대기',
     uploaded: '검사 대기',
@@ -419,11 +646,25 @@ function uploadFileStatusLabel(
   }[status];
 }
 
+function safeUploadErrorCode(value?: string | null): string {
+  const normalized = value?.trim() ?? '';
+  return /^[A-Z][A-Z0-9_]{1,47}$/u.test(normalized)
+    ? normalized
+    : 'UNKNOWN_ERROR';
+}
+
 function uploadFileStatusToneClass(
   status: SourcePackageSummary['files'][number]['status'],
+  uploadState?: SourcePackageSummary['files'][number]['uploadState'],
 ): 'is-pending' | 'is-success' | 'is-critical' {
   if (status === 'stored') return 'is-success';
-  if (status === 'rejected' || status === 'deleted') return 'is-critical';
+  if (
+    status === 'rejected' ||
+    status === 'deleted' ||
+    uploadState === 'failed' ||
+    uploadState === 'expired'
+  )
+    return 'is-critical';
   return 'is-pending';
 }
 

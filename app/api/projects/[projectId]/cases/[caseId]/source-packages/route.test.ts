@@ -24,6 +24,13 @@ const create = vi.fn().mockImplementation((record) =>
 );
 const listForActor = vi.fn();
 
+vi.mock('@/lib/files/r2-factory', () => ({
+  FileStorageUnavailableError: class FileStorageUnavailableError extends Error {
+    readonly code = 'FILE_STORAGE_UNAVAILABLE';
+  },
+  getPrivateFileStorage: vi.fn(() => ({})),
+}));
+
 vi.mock('@/lib/ingestion/d1-repository', () => ({
   D1SourcePackageRepository: class {
     create = create;

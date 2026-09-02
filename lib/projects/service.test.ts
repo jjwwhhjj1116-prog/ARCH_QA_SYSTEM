@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '@/lib/domain/contracts';
 import { MemoryProjectRepository } from './memory-repository';
-import { ProjectConflictError } from './repository';
+import {
+  ProjectAccessError,
+  ProjectConfirmationError,
+  ProjectConflictError,
+} from './repository';
 import { ProjectService } from './service';
 
 const actor: Actor = {
@@ -73,5 +77,65 @@ describe('project service', () => {
         'req-2',
       ),
     ).rejects.toBeInstanceOf(ProjectConflictError);
+  });
+
+  it('archives a project without deleting its audit lineage', async () => {
+    const repository = new MemoryProjectRepository();
+    const service = new ProjectService(repository);
+    const project = await service.create(
+      actor,
+      { name: '부산대연', clientName: '한화건설' },
+      'req-create',
+    );
+    const archived = await service.archive(
+      project.id,
+      actor,
+      { confirmationName: project.name },
+      'req-archive',
+    );
+    expect(archived.status).toBe('archived');
+    await expect(service.list(actor)).resolves.toEqual([]);
+    expect(repository.audit.at(-1)).toEqual({
+      actorId: actor.id,
+      action: 'project.archived',
+      projectId: project.id,
+      requestId: 'req-archive',
+    });
+  });
+
+  it('requires the exact project name before archiving', async () => {
+    const repository = new MemoryProjectRepository();
+    const service = new ProjectService(repository);
+    const project = await service.create(
+      actor,
+      { name: '부산대연', clientName: '' },
+      'req-create',
+    );
+    await expect(
+      service.archive(
+        project.id,
+        actor,
+        { confirmationName: '덕천3구역' },
+        'req-archive',
+      ),
+    ).rejects.toBeInstanceOf(ProjectConfirmationError);
+  });
+
+  it('does not let a non-member archive a project', async () => {
+    const repository = new MemoryProjectRepository();
+    const service = new ProjectService(repository);
+    const project = await service.create(
+      actor,
+      { name: '부산대연', clientName: '' },
+      'req-create',
+    );
+    await expect(
+      service.archive(
+        project.id,
+        { ...actor, id: 'outsider' },
+        { confirmationName: project.name },
+        'req-archive',
+      ),
+    ).rejects.toBeInstanceOf(ProjectAccessError);
   });
 });

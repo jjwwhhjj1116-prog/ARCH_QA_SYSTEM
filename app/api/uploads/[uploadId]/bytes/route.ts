@@ -8,7 +8,10 @@ import type {
   ApiSuccessEnvelope,
 } from '@/lib/domain/contracts';
 import { SourceFileConflictError } from '@/lib/files/storage';
-import { getPrivateFileStorage } from '@/lib/files/r2-factory';
+import {
+  FileStorageUnavailableError,
+  getPrivateFileStorage,
+} from '@/lib/files/r2-factory';
 import { readBoundedBytes } from '@/lib/http/bounded-bytes';
 import {
   assertSameSiteMutation,
@@ -75,6 +78,10 @@ function failure(error: unknown, requestId: string): Response {
     error instanceof SourceFileConflictError
   ) {
     status = 409;
+    code = error.code;
+    message = error.message;
+  } else if (error instanceof FileStorageUnavailableError) {
+    status = 503;
     code = error.code;
     message = error.message;
   } else if (error instanceof SourceInspectionError) {

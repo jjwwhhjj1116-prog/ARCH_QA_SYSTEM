@@ -40,6 +40,8 @@ type ExistingFileRow = {
   extension_claimed: 'xlsx' | 'csv';
   declared_document_kind: 'takeoff' | 'summary' | 'unknown';
   status: SourceUploadIntentSummary['status'];
+  upload_state: NonNullable<SourceUploadIntentSummary['uploadState']>;
+  error_code: string | null;
   size_bytes: number;
 };
 
@@ -118,7 +120,8 @@ export class D1SourcePackageRepository
           `SELECT sp.id AS package_id, ua.id AS upload_id,
                   sf.id AS source_file_id, sfv.id AS source_version_id,
                   sfv.original_filename, sfv.extension_claimed,
-                  sf.declared_document_kind, sfv.status, sfv.size_bytes
+                  sf.declared_document_kind, sfv.status, sfv.size_bytes,
+                  ua.state AS upload_state, ua.error_code
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN project p ON p.id = sp.project_id
@@ -734,7 +737,7 @@ export class D1SourcePackageRepository
           `SELECT ua.id AS upload_id, sf.id AS source_file_id,
                   sfv.id AS source_version_id, sfv.original_filename,
                   sfv.extension_claimed, sf.declared_document_kind, sfv.status,
-                  sfv.size_bytes
+                  sfv.size_bytes, ua.state AS upload_state, ua.error_code
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN source_file sf ON sf.package_id = sp.id
@@ -850,6 +853,8 @@ function summaryFromRecord(
       documentKind: file.documentKind,
       sizeBytes: file.sizeBytes,
       status: file.status,
+      uploadState: 'created',
+      errorCode: null,
     })),
     createdAt: record.createdAt.toISOString(),
   };
@@ -865,5 +870,7 @@ function fileSummary(row: ExistingFileRow): SourceUploadIntentSummary {
     documentKind: row.declared_document_kind,
     sizeBytes: row.size_bytes,
     status: row.status,
+    uploadState: row.upload_state,
+    errorCode: row.error_code,
   };
 }

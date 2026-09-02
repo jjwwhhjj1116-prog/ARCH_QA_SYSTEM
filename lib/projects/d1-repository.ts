@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne } from 'drizzle-orm';
-import { getDb } from '@/db';
+import { getD1Binding, getDb } from '@/db';
 import {
   auditEvents,
   projectMembers,
@@ -8,8 +8,17 @@ import {
   userProfiles,
 } from '@/db/schema';
 import type { ProjectRole, ProjectSummary } from '@/lib/domain/contracts';
-import type { NewProjectRecord, ProjectRepository } from './repository';
-import { ProjectConflictError } from './repository';
+import type {
+  ArchiveProjectRecord,
+  NewProjectRecord,
+  ProjectRepository,
+} from './repository';
+import {
+  ProjectAccessError,
+  ProjectConfirmationError,
+  ProjectConflictError,
+  ProjectNotFoundError,
+} from './repository';
 
 export class D1ProjectRepository implements ProjectRepository {
   async listForActor(actorId: string): Promise<ProjectSummary[]> {
@@ -26,7 +35,9 @@ export class D1ProjectRepository implements ProjectRepository {
       })
       .from(projectMembers)
       .innerJoin(projects, eq(projectMembers.projectId, projects.id))
-      .where(eq(projectMembers.userId, actorId));
+      .where(
+        and(eq(projectMembers.userId, actorId), eq(projects.status, 'active')),
+      );
 
     if (visible.length === 0) return [];
     const projectIds = visible.map((row) => row.id);
@@ -124,6 +135,99 @@ export class D1ProjectRepository implements ProjectRepository {
       openCaseCount: 0,
       needsAttentionCount: 0,
       createdAt: record.createdAt.toISOString(),
+    };
+  }
+
+  async archive(record: ArchiveProjectRecord): Promise<ProjectSummary> {
+    const binding = getD1Binding();
+    const row = await binding
+      .prepare(
+        `SELECT p.id, p.code, p.name, p.client_name, p.status, p.created_at,
+                pm.role,
+                (SELECT COUNT(*) FROM review_case rc
+                  WHERE rc.project_id = p.id AND rc.status <> 'archived') AS open_case_count,
+                (SELECT COUNT(*) FROM review_case rc
+                  WHERE rc.project_id = p.id AND rc.status = 'needs_attention') AS needs_attention_count
+         FROM project p
+         LEFT JOIN project_member pm
+           ON pm.project_id = p.id AND pm.user_id = ?
+         WHERE p.id = ?
+         LIMIT 1`,
+      )
+      .bind(record.actor.id, record.projectId)
+      .first<{
+        id: string;
+        code: string;
+        name: string;
+        client_name: string | null;
+        status: 'active' | 'archived';
+        created_at: number;
+        role: ProjectRole | null;
+        open_case_count: number;
+        needs_attention_count: number;
+      }>();
+    if (!row || row.status !== 'active') {
+      throw new ProjectNotFoundError('활성 프로젝트를 찾을 수 없습니다.');
+    }
+    if (row.role !== 'workspace_admin' && row.role !== 'project_owner') {
+      throw new ProjectAccessError('이 프로젝트를 보관할 권한이 없습니다.');
+    }
+    if (record.confirmationName !== row.name) {
+      throw new ProjectConfirmationError(
+        '확인을 위해 입력한 프로젝트명이 일치하지 않습니다.',
+      );
+    }
+    const archivedAt = record.archivedAt.getTime();
+    const results = await binding.batch([
+      binding
+        .prepare(
+          `INSERT INTO audit_event
+             (id, project_id, actor_id, action, target_type, target_id,
+              payload_json, request_id, created_at)
+           SELECT ?, p.id, ?, 'project.archived', 'project', p.id, ?, ?, ?
+           FROM project p
+           INNER JOIN project_member pm ON pm.project_id = p.id
+           WHERE p.id = ? AND p.status = 'active' AND p.name = ?
+             AND pm.user_id = ? AND pm.role IN ('workspace_admin','project_owner')`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          record.actor.id,
+          JSON.stringify({ name: row.name, deletionMode: 'archive' }),
+          record.requestId,
+          archivedAt,
+          record.projectId,
+          record.confirmationName,
+          record.actor.id,
+        ),
+      binding
+        .prepare(
+          `UPDATE project
+           SET status = 'archived'
+           WHERE id = ? AND status = 'active' AND name = ?
+             AND EXISTS (
+               SELECT 1 FROM project_member pm
+               WHERE pm.project_id = project.id AND pm.user_id = ?
+                 AND pm.role IN ('workspace_admin','project_owner')
+             )`,
+        )
+        .bind(record.projectId, record.confirmationName, record.actor.id),
+    ]);
+    if (results.some((result) => result.meta.changes !== 1)) {
+      throw new ProjectConflictError(
+        '프로젝트 상태가 변경되었습니다. 목록을 새로고침해 주세요.',
+      );
+    }
+    return {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      clientName: row.client_name,
+      status: 'archived',
+      role: row.role,
+      openCaseCount: row.open_case_count,
+      needsAttentionCount: row.needs_attention_count,
+      createdAt: new Date(row.created_at).toISOString(),
     };
   }
 }

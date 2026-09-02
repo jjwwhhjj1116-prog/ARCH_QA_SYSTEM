@@ -56,8 +56,9 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
     expect(screen.getByText('팀별 검수 케이스')).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: '새 프로젝트 등록' }),
-    ).toBeNull();
+      screen.getByRole('button', { name: '새 프로젝트 등록' }),
+    ).toBeVisible();
+    expect(screen.getByText('PROJECT CONTEXT · RAG STATUS')).toBeVisible();
   });
 
   it('shows an actionable error instead of a blank surface', async () => {
@@ -220,7 +221,7 @@ describe('ReviewStudio', () => {
     );
     expect(screen.getByText('원본 저장 완료')).toBeVisible();
     expect(screen.getByText('1/1개 저장 ·', { exact: false })).toBeVisible();
-    expect(screen.getByText('내부산출서.csv')).toBeVisible();
+    expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
     expect(packageListCalls).toBe(2);
   });
 
@@ -287,15 +288,154 @@ describe('ReviewStudio', () => {
     await waitFor(() =>
       expect(
         document.querySelector('.source-upload-progress'),
-      ).toHaveTextContent('0/1개 서버 저장 확인'),
+      ).toHaveTextContent('0/1개 서버 저장 완료'),
     );
     expect(
       screen.getByText('원본 저장소에 연결하지 못했습니다.'),
     ).toBeVisible();
-    expect(screen.getByText('내부산출서.csv')).toBeVisible();
+    expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
     expect(
       screen.getByRole('button', { name: '원본 검사 후 다시 저장' }),
     ).toBeEnabled();
+  });
+
+  it('continues after one blocked workbook and stores the remaining files', async () => {
+    const project = projectFixture('P100', '웹 검수 프로젝트');
+    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
+    const packageId = '33333333-3333-4333-8333-333333333333';
+    const blockedUploadId = '44444444-4444-4444-8444-444444444444';
+    const storedUploadId = '77777777-7777-4777-8777-777777777777';
+    const pendingPackage = {
+      ...sourcePackageFixture({
+        packageId,
+        projectId: project.id,
+        reviewCaseId: reviewCase.id,
+        uploadId: blockedUploadId,
+        status: 'upload_pending',
+      }),
+      files: [
+        {
+          uploadId: blockedUploadId,
+          sourceFileId: crypto.randomUUID(),
+          sourceVersionId: crypto.randomUUID(),
+          filename: '가설산출서.xlsx',
+          format: 'xlsx' as const,
+          documentKind: 'takeoff' as const,
+          sizeBytes: 4,
+          status: 'upload_pending' as const,
+        },
+        {
+          uploadId: storedUploadId,
+          sourceFileId: crypto.randomUUID(),
+          sourceVersionId: crypto.randomUUID(),
+          filename: '공용집계표.csv',
+          format: 'csv' as const,
+          documentKind: 'summary' as const,
+          sizeBytes: 8,
+          status: 'upload_pending' as const,
+        },
+      ],
+    };
+    let packageListCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url === `/api/projects/${project.id}/cases`)
+        return jsonResponse([reviewCase]);
+      if (
+        url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
+        init?.method === 'POST'
+      )
+        return jsonResponse(pendingPackage, 201);
+      if (
+        url ===
+        `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
+      ) {
+        packageListCalls += 1;
+        return jsonResponse(
+          packageListCalls === 1
+            ? []
+            : [
+                {
+                  ...pendingPackage,
+                  files: [
+                    {
+                      ...pendingPackage.files[0],
+                      uploadState: 'failed',
+                      errorCode: 'FILE_XLSX_ACTIVE_CONTENT',
+                    },
+                    { ...pendingPackage.files[1], status: 'stored' },
+                  ],
+                },
+              ],
+        );
+      }
+      if (url === `/api/uploads/${blockedUploadId}/bytes`) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'FILE_XLSX_ACTIVE_CONTENT',
+              message:
+                '실행 가능한 포함 개체가 있어 이 파일을 저장하지 않았습니다.',
+              requestId: 'r-blocked',
+            },
+          }),
+          { status: 400 },
+        );
+      }
+      if (url === `/api/uploads/${storedUploadId}/bytes`) {
+        return jsonResponse({
+          uploadId: storedUploadId,
+          packageId,
+          filename: '공용집계표.csv',
+          status: 'stored',
+          packageStatus: 'stored_unverified',
+          projectIdentityStatus: 'pending',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 8,
+          warnings: [],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
+    );
+    await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
+    const files = [
+      new File(['xlsx'], '가설산출서.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }),
+      new File(['a,b\nc,1\n'], '공용집계표.csv', { type: 'text/csv' }),
+    ];
+    fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+      target: { files },
+    });
+    const submit = screen.getByRole('button', { name: '원본 검사 후 저장' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.submit(submit.closest('form')!);
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('.source-upload-progress'),
+      ).toHaveTextContent('1/2개 서버 저장 완료'),
+    );
+    expect(screen.getByText('저장하지 못한 파일')).toBeVisible();
+    expect(screen.getAllByText('가설산출서.xlsx').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/FILE_XLSX_ACTIVE_CONTENT/u).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/실행 가능한 포함 개체/u).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText('공용집계표.csv').length).toBeGreaterThan(0);
   });
 
   it('exposes expandable structure and finish analysis groups', async () => {

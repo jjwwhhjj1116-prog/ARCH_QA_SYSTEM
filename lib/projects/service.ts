@@ -4,6 +4,7 @@ import type {
   ProjectSummary,
 } from '@/lib/domain/contracts';
 import { createProjectSchema } from '@/lib/domain/contracts';
+import { z } from 'zod';
 import type { ProjectRepository } from './repository';
 
 export class ProjectService {
@@ -31,6 +32,24 @@ export class ProjectService {
       role: 'project_owner',
       requestId,
       createdAt: new Date(),
+    });
+  }
+
+  archive(
+    projectId: string,
+    actor: Actor,
+    input: unknown,
+    requestId: string,
+  ): Promise<ProjectSummary> {
+    const parsed = z
+      .object({ confirmationName: z.string().trim().min(2).max(120) })
+      .parse(input);
+    return this.repository.archive({
+      projectId,
+      confirmationName: parsed.confirmationName,
+      actor,
+      requestId,
+      archivedAt: new Date(),
     });
   }
 }

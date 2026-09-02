@@ -35,8 +35,11 @@ yarn-error.log*
 /playwright-report/
 /test-results/
 /.impeccable/review/
-/.uv-cache/
+/.playwright-cli/
 /.npm-cache/
+/artifacts/
+/output/
+/.uv-cache/
 /.e2e-server.pid
 
 # deployment and generated files

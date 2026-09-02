@@ -15,6 +15,10 @@ import {
   runtimeMode,
 } from '@/lib/http/request-boundary';
 import {
+  FileStorageUnavailableError,
+  getPrivateFileStorage,
+} from '@/lib/files/r2-factory';
+import {
   createSourcePackageSchema,
   idempotencyKeySchema,
 } from '@/lib/ingestion/contracts';
@@ -73,6 +77,8 @@ export async function POST(
       request.headers.get('idempotency-key'),
     );
     const input = createSourcePackageSchema.parse(await readJson(request));
+    // Do not create D1 upload intents when the private byte store is unavailable.
+    getPrivateFileStorage();
     const data = await service.create(
       projectId,
       caseId,
@@ -106,6 +112,10 @@ function failure(error: unknown, requestId: string): Response {
     message = error.message;
   } else if (error instanceof SourcePackageConflictError) {
     status = 409;
+    code = error.code;
+    message = error.message;
+  } else if (error instanceof FileStorageUnavailableError) {
+    status = 503;
     code = error.code;
     message = error.message;
   } else if (error instanceof SourceInspectionError) {

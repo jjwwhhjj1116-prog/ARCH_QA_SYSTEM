@@ -23,6 +23,7 @@ import type {
   ReviewCaseSummary,
 } from '@/lib/domain/contracts';
 import type { GeminiConfigurationStatus } from '@/lib/server/ai/gemini-config';
+import type { Mem0ConfigurationStatus } from '@/lib/server/memory/mem0-rest';
 
 export type StructureAnalysisView =
   | 'analysis-structure-beam'
@@ -655,6 +656,11 @@ function SettingsWorkspace() {
     null,
   );
   const [aiMessage, setAiMessage] = useState('Gemini 서버 설정을 확인하는 중…');
+  const [memoryStatus, setMemoryStatus] =
+    useState<Mem0ConfigurationStatus | null>(null);
+  const [memoryMessage, setMemoryMessage] = useState(
+    '공유 개발 메모리 설정을 확인하는 중…',
+  );
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
@@ -689,6 +695,47 @@ function SettingsWorkspace() {
           error instanceof Error
             ? error.message
             : 'Gemini 설정을 확인하지 못했습니다.',
+        );
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch('/api/settings/memory', {
+          cache: 'no-store',
+        });
+        const body = (await response.json()) as
+          | ApiSuccessEnvelope<Mem0ConfigurationStatus>
+          | ApiErrorEnvelope;
+        if (!response.ok || 'error' in body) {
+          throw new Error(
+            'error' in body
+              ? body.error.message
+              : '공유 메모리 설정을 확인하지 못했습니다.',
+          );
+        }
+        if (cancelled) return;
+        setMemoryStatus(body.data);
+        setMemoryMessage(
+          body.data.status === 'ready'
+            ? '로컬 개발 도구와 웹이 같은 Mem0 프로젝트를 조회할 준비가 되었습니다.'
+            : body.data.status === 'not_configured'
+              ? 'Mem0 Platform 서버 비밀키를 등록하면 공유 조회를 활성화할 수 있습니다.'
+              : '현재는 안전하게 비활성 상태입니다. D1·R2 검수 원본에는 영향이 없습니다.',
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setMemoryMessage(
+          error instanceof Error
+            ? error.message
+            : '공유 메모리 설정을 확인하지 못했습니다.',
         );
       }
     };
@@ -782,6 +829,57 @@ function SettingsWorkspace() {
             >
               {testing ? '연결 확인 중…' : 'Gemini 연결 시험'}
             </button>
+          </div>
+        </div>
+      </section>
+      <section
+        className="glass-panel ai-settings-panel"
+        aria-labelledby="memory-settings-title"
+      >
+        <div className="panel-heading">
+          <div>
+            <span className="panel-kicker">SHARED DEVELOPMENT MEMORY</span>
+            <h2 id="memory-settings-title">Mem0 공유 메모리</h2>
+            <p>
+              프로젝트 규칙과 작업 맥락을 검색하는 보조 계층입니다. 산출서 원본,
+              판정 결과와 감사 기록의 기준 저장소는 계속 Cloudflare D1·R2입니다.
+            </p>
+          </div>
+          <span
+            className={`status-badge ${memoryStatus?.status === 'ready' ? 'status-ready' : 'status-pending'}`}
+          >
+            {memoryStatus?.status === 'ready'
+              ? '조회 준비 완료'
+              : memoryStatus?.status === 'not_configured'
+                ? '키 미등록'
+                : '비활성'}
+          </span>
+        </div>
+        <div className="ai-settings-grid">
+          <dl>
+            <div>
+              <dt>Mode</dt>
+              <dd>{memoryStatus?.mode ?? 'disabled'}</dd>
+            </div>
+            <div>
+              <dt>Scope</dt>
+              <dd>{memoryStatus?.sharedAgentId ?? 'concost-qc-shared-v1'}</dd>
+            </div>
+            <div>
+              <dt>Access</dt>
+              <dd>프로젝트 멤버만 · 읽기 전용</dd>
+            </div>
+            <div>
+              <dt>Workbook</dt>
+              <dd>원본·수식·수량 외부 전송 금지</dd>
+            </div>
+          </dl>
+          <div className="ai-settings-actions">
+            <output aria-live="polite">{memoryMessage}</output>
+            <span className="settings-safety-note">
+              쓰기 API는 아직 닫혀 있습니다. 운영 정책 승인 후 별도
+              활성화합니다.
+            </span>
           </div>
         </div>
       </section>
