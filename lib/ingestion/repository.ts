@@ -26,6 +26,23 @@ export type NewSourcePackageRecord = {
   expiresAt: Date;
 };
 
+export type ArchiveSourcePackageRecord = {
+  projectId: string;
+  reviewCaseId: string;
+  packageId: string;
+  expectedVersion: number;
+  actor: Actor;
+  requestId: string;
+  archivedAt: Date;
+};
+
+export type ArchivedSourcePackageSummary = {
+  id: string;
+  status: 'aborted';
+  deletionMode: 'soft_abort';
+  retainedForAudit: true;
+};
+
 export interface SourcePackageRepository {
   listForActor(
     projectId: string,
@@ -33,6 +50,9 @@ export interface SourcePackageRepository {
     actorId: string,
   ): Promise<SourcePackageSummary[]>;
   create(record: NewSourcePackageRecord): Promise<SourcePackageSummary>;
+  archive(
+    record: ArchiveSourcePackageRecord,
+  ): Promise<ArchivedSourcePackageSummary>;
 }
 
 export type UploadContext = {

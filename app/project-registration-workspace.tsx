@@ -34,7 +34,6 @@ type Props = {
   onSelectAndContinue: (projectId: string) => void;
   onArchiveProject: (
     project: ProjectSummary,
-    confirmationName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
 };
 
@@ -59,19 +58,25 @@ export function ProjectRegistrationWorkspace({
   const [archiveTarget, setArchiveTarget] = useState<ProjectSummary | null>(
     null,
   );
-  const [confirmationName, setConfirmationName] = useState('');
   const [archiveError, setArchiveError] = useState('');
 
   useEffect(() => {
     if (archiveTarget && !archiveDialogRef.current?.open) {
-      archiveDialogRef.current?.showModal();
+      if (typeof archiveDialogRef.current?.showModal === 'function') {
+        archiveDialogRef.current.showModal();
+      } else {
+        archiveDialogRef.current?.setAttribute('open', '');
+      }
     }
   }, [archiveTarget]);
 
   function closeArchiveDialog() {
-    archiveDialogRef.current?.close();
+    if (typeof archiveDialogRef.current?.close === 'function') {
+      archiveDialogRef.current.close();
+    } else {
+      archiveDialogRef.current?.removeAttribute('open');
+    }
     setArchiveTarget(null);
-    setConfirmationName('');
     setArchiveError('');
   }
 
@@ -82,7 +87,7 @@ export function ProjectRegistrationWorkspace({
       aria-labelledby="page-title"
     >
       <StageHeading
-        eyebrow="1 / 5 · 프로젝트 등록"
+        eyebrow="PROJECT WORKSPACE · 프로젝트 관리"
         title="검수 프로젝트를 선택하세요"
         description="ERP 그룹웨어와 동일한 프로젝트명으로 등록한 뒤, 선택한 프로젝트의 자료 등록 단계로 이동합니다."
         action={
@@ -272,8 +277,8 @@ export function ProjectRegistrationWorkspace({
                       >
                         <Trash2 aria-hidden="true" />
                         {archivingProjectId === project.id
-                          ? '보관 중…'
-                          : '프로젝트 삭제'}
+                          ? '삭제 중…'
+                          : '삭제'}
                       </button>
                     )}
                   </td>
@@ -293,6 +298,7 @@ export function ProjectRegistrationWorkspace({
         ref={archiveDialogRef}
         className="archive-project-dialog"
         aria-labelledby="archive-project-title"
+        aria-describedby="archive-project-description"
         onCancel={(event) => {
           event.preventDefault();
           if (archiveTarget && archivingProjectId === archiveTarget.id) return;
@@ -300,7 +306,6 @@ export function ProjectRegistrationWorkspace({
         }}
         onClose={() => {
           setArchiveTarget(null);
-          setConfirmationName('');
           setArchiveError('');
         }}
       >
@@ -309,12 +314,8 @@ export function ProjectRegistrationWorkspace({
             method="dialog"
             onSubmit={async (event) => {
               event.preventDefault();
-              if (confirmationName !== archiveTarget.name) return;
               setArchiveError('');
-              const result = await onArchiveProject(
-                archiveTarget,
-                confirmationName,
-              );
+              const result = await onArchiveProject(archiveTarget);
               if (result.ok) closeArchiveDialog();
               else setArchiveError(result.message);
             }}
@@ -336,20 +337,10 @@ export function ProjectRegistrationWorkspace({
                 <X aria-hidden="true" />
               </button>
             </div>
-            <p>
-              원본 자료와 검수 이력은 지우지 않고 안전하게 보관합니다.
-              계속하려면 아래에 <strong>{archiveTarget.name}</strong>을 정확히
-              입력하세요.
+            <p id="archive-project-description">
+              <strong>{archiveTarget.name}</strong> 프로젝트를 정말 삭제할까요?
+              목록에서는 사라지지만 원본 자료와 검수 이력은 안전하게 보관됩니다.
             </p>
-            <label>
-              프로젝트명 확인
-              <input
-                autoFocus
-                value={confirmationName}
-                onChange={(event) => setConfirmationName(event.target.value)}
-                placeholder={archiveTarget.name}
-              />
-            </label>
             {archiveError && (
               <p className="archive-project-error" role="alert">
                 <AlertTriangle aria-hidden="true" /> {archiveError}
@@ -367,15 +358,10 @@ export function ProjectRegistrationWorkspace({
               <button
                 type="submit"
                 className="danger-action"
-                disabled={
-                  confirmationName !== archiveTarget.name ||
-                  archivingProjectId === archiveTarget.id
-                }
+                disabled={archivingProjectId === archiveTarget.id}
               >
                 <Trash2 aria-hidden="true" />
-                {archivingProjectId === archiveTarget.id
-                  ? '프로젝트 삭제 중…'
-                  : '프로젝트 삭제'}
+                {archivingProjectId === archiveTarget.id ? '삭제 중…' : '삭제'}
               </button>
             </div>
           </form>

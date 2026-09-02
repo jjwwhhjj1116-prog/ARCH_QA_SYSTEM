@@ -2,11 +2,13 @@
 
 import {
   AlertTriangle,
+  ArrowRight,
   Check,
   ChevronRight,
   FileSpreadsheet,
   Plus,
   Search,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -37,6 +39,7 @@ type Props = {
   sourcePackages: SourcePackageSummary[];
   sourcePackageState: 'loading' | 'ready' | 'error';
   sourcePackageError: string;
+  deletingSourcePackageId: string | null;
   message: string;
   messageTone: 'neutral' | 'success' | 'error';
   onOpenRegistration: () => void;
@@ -47,6 +50,8 @@ type Props = {
   onCloseUpload: () => void;
   onFilesChange: (files: File[]) => void;
   onRetryPackages: () => void;
+  onArchiveSourcePackage: (sourcePackage: SourcePackageSummary) => void;
+  onContinueToAiReview: () => void;
   onUpload: (event: SyntheticEvent<HTMLFormElement, SubmitEvent>) => void;
 };
 
@@ -67,6 +72,7 @@ export function ProjectDataWorkspace({
   sourcePackages,
   sourcePackageState,
   sourcePackageError,
+  deletingSourcePackageId,
   message,
   messageTone,
   onOpenRegistration,
@@ -77,6 +83,8 @@ export function ProjectDataWorkspace({
   onCloseUpload,
   onFilesChange,
   onRetryPackages,
+  onArchiveSourcePackage,
+  onContinueToAiReview,
   onUpload,
 }: Props) {
   const [candidateProjectId, setCandidateProjectId] = useState(
@@ -95,7 +103,7 @@ export function ProjectDataWorkspace({
       aria-labelledby="page-title"
     >
       <StageHeading
-        eyebrow="2 / 5 · 프로젝트 자료"
+        eyebrow="STEP 1 / 3 · 자료 등록"
         title="산출서와 집계표를 등록하세요"
         description={
           selectedProject
@@ -364,6 +372,24 @@ export function ProjectDataWorkspace({
                                 {' · 묶음 '}
                                 {sourcePackage.id.slice(0, 8)}
                               </small>
+                              {canArchiveSourcePackage(sourcePackage) && (
+                                <button
+                                  className="source-package-delete"
+                                  type="button"
+                                  disabled={
+                                    uploading ||
+                                    deletingSourcePackageId === sourcePackage.id
+                                  }
+                                  onClick={() =>
+                                    onArchiveSourcePackage(sourcePackage)
+                                  }
+                                >
+                                  <Trash2 aria-hidden="true" />
+                                  {deletingSourcePackageId === sourcePackage.id
+                                    ? '삭제 중…'
+                                    : '삭제'}
+                                </button>
+                              )}
                             </div>
                             <ul
                               aria-label={`${sourcePackage.displayName} 파일`}
@@ -389,6 +415,33 @@ export function ProjectDataWorkspace({
                     </ul>
                   )}
                 </section>
+                {sourcePackages.some(isFullyStoredPackage) && (
+                  <section
+                    className="next-step-panel"
+                    aria-labelledby="next-step-title"
+                  >
+                    <span className="next-step-check" aria-hidden="true">
+                      <Check />
+                    </span>
+                    <div>
+                      <span className="selection-label">STEP 1 완료</span>
+                      <h5 id="next-step-title">
+                        자료 저장을 확인했습니다. AI 검수를 시작하세요.
+                      </h5>
+                      <p>
+                        서버에서 전 파일 저장이 확인된 자료 묶음이 있습니다.
+                        다음 화면에서 산출식 이상치부터 검수합니다.
+                      </p>
+                    </div>
+                    <button
+                      className="next-step-action"
+                      type="button"
+                      onClick={onContinueToAiReview}
+                    >
+                      STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
+                    </button>
+                  </section>
+                )}
                 <div className="form-actions">
                   <button
                     className="secondary-action"
@@ -416,6 +469,19 @@ export function ProjectDataWorkspace({
         </section>
       )}
     </section>
+  );
+}
+
+function canArchiveSourcePackage(sourcePackage: SourcePackageSummary): boolean {
+  return ['draft', 'receiving', 'blocked', 'rejected'].includes(
+    sourcePackage.status,
+  );
+}
+
+function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
+  return (
+    sourcePackage.files.length > 0 &&
+    sourcePackage.files.every((file) => file.status === 'stored')
   );
 }
 

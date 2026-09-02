@@ -9,6 +9,8 @@ import type {
 } from './contracts';
 import { INGESTION_HARD_RULE_VERSION } from './contracts';
 import type {
+  ArchivedSourcePackageSummary,
+  ArchiveSourcePackageRecord,
   NewSourcePackageRecord,
   SourcePackageRepository,
   SourceUploadRepository,
@@ -29,6 +31,7 @@ type ExistingPackageRow = {
   request_hash: string;
   status: SourcePackageSummary['status'];
   project_identity_status: SourcePackageSummary['projectIdentityStatus'];
+  version: number;
   created_at: number;
 };
 
@@ -104,7 +107,7 @@ export class D1SourcePackageRepository
       binding
         .prepare(
           `SELECT sp.id, sp.project_id, sp.review_case_id, sp.display_name,
-                  sp.status, sp.project_identity_status, sp.created_at
+                  sp.status, sp.project_identity_status, sp.version, sp.created_at
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN project p ON p.id = sp.project_id
@@ -112,6 +115,7 @@ export class D1SourcePackageRepository
            WHERE sp.project_id = ? AND sp.review_case_id = ?
              AND rc.project_id = sp.project_id AND pm.user_id = ?
              AND p.status = 'active' AND rc.status <> 'archived'
+             AND sp.status <> 'aborted'
            ORDER BY sp.created_at DESC, sp.id DESC`,
         )
         .bind(projectId, reviewCaseId, actorId),
@@ -132,6 +136,7 @@ export class D1SourcePackageRepository
            WHERE sp.project_id = ? AND sp.review_case_id = ?
              AND rc.project_id = sp.project_id AND pm.user_id = ?
              AND p.status = 'active' AND rc.status <> 'archived'
+             AND sp.status <> 'aborted' AND sf.status = 'active'
              AND sfv.version_number = (
                SELECT MAX(latest_version.version_number)
                FROM source_file_version latest_version
@@ -164,6 +169,7 @@ export class D1SourcePackageRepository
     return ((packagesRaw as D1Result<ListedPackageRow>).results ?? []).map(
       (row) => ({
         id: row.id,
+        version: row.version,
         projectId: row.project_id,
         reviewCaseId: row.review_case_id,
         displayName: row.display_name,
@@ -173,6 +179,179 @@ export class D1SourcePackageRepository
         createdAt: new Date(row.created_at).toISOString(),
       }),
     );
+  }
+
+  async archive(
+    record: ArchiveSourcePackageRecord,
+  ): Promise<ArchivedSourcePackageSummary> {
+    const binding = getD1Binding();
+    const row = await binding
+      .prepare(
+        `SELECT sp.status, sp.version, sp.created_by, pm.role,
+                (SELECT COUNT(*) FROM upload_attempt active_attempt
+                 WHERE active_attempt.package_id = sp.id
+                   AND active_attempt.state IN ('uploading','uploaded','finalizing')) AS active_upload_count,
+                (SELECT COUNT(*) FROM source_file_version stored_version
+                 WHERE stored_version.package_id = sp.id
+                   AND stored_version.status = 'stored') AS stored_file_count,
+                (SELECT COUNT(*) FROM source_file package_file
+                 WHERE package_file.package_id = sp.id) AS file_count
+         FROM source_package sp
+         INNER JOIN review_case rc ON rc.id = sp.review_case_id
+         INNER JOIN project p ON p.id = sp.project_id
+         INNER JOIN project_member pm ON pm.project_id = sp.project_id
+         WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ?
+           AND rc.project_id = sp.project_id AND p.status = 'active'
+           AND rc.status <> 'archived' AND pm.user_id = ?
+         LIMIT 1`,
+      )
+      .bind(
+        record.packageId,
+        record.projectId,
+        record.reviewCaseId,
+        record.actor.id,
+      )
+      .first<{
+        status: SourcePackageSummary['status'];
+        version: number;
+        created_by: string;
+        role: string;
+        active_upload_count: number;
+        stored_file_count: number;
+        file_count: number;
+      }>();
+    if (!row) {
+      throw new SourcePackageAccessError(
+        '삭제할 등록 자료 묶음을 찾지 못했거나 접근 권한이 없습니다.',
+      );
+    }
+    const canArchiveAny =
+      row.role === 'workspace_admin' || row.role === 'project_owner';
+    if (!canArchiveAny && row.created_by !== record.actor.id) {
+      throw new SourcePackageAccessError(
+        '다른 사용자가 등록한 자료 묶음을 삭제할 권한이 없습니다.',
+      );
+    }
+    if (row.status === 'aborted') {
+      return {
+        id: record.packageId,
+        status: 'aborted',
+        deletionMode: 'soft_abort',
+        retainedForAudit: true,
+      };
+    }
+    if (row.version !== record.expectedVersion) {
+      throw new SourcePackageConflictError(
+        '등록 자료 상태가 변경되었습니다. 저장 내역을 새로고침해 주세요.',
+      );
+    }
+    if (!['draft', 'receiving', 'blocked', 'rejected'].includes(row.status)) {
+      throw new SourcePackageConflictError(
+        '저장이 완료된 자료 묶음은 이 화면에서 삭제할 수 없습니다.',
+      );
+    }
+    if (row.active_upload_count > 0) {
+      throw new SourcePackageConflictError(
+        '현재 저장 처리 중인 파일이 있습니다. 완료 또는 실패 후 다시 삭제하세요.',
+      );
+    }
+    const archivedAt = record.archivedAt.getTime();
+    const results = await binding.batch([
+      binding
+        .prepare(
+          `UPDATE source_package
+           SET status = 'aborted', version = version + 1
+           WHERE id = ? AND project_id = ? AND review_case_id = ?
+             AND version = ? AND status IN ('draft','receiving','blocked','rejected')
+             AND NOT EXISTS (
+               SELECT 1 FROM upload_attempt active_attempt
+               WHERE active_attempt.package_id = source_package.id
+                 AND active_attempt.state IN ('uploading','uploaded','finalizing')
+             )`,
+        )
+        .bind(
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          record.expectedVersion,
+        ),
+      binding
+        .prepare(
+          `UPDATE upload_attempt
+           SET state = 'expired', error_code = 'PACKAGE_ABORTED',
+               version = version + 1, updated_at = ?
+           WHERE package_id = ? AND project_id = ? AND review_case_id = ?
+             AND state IN ('created','failed')
+             AND EXISTS (
+               SELECT 1 FROM source_package sp
+               WHERE sp.id = upload_attempt.package_id AND sp.status = 'aborted'
+                 AND sp.version = ?
+             )`,
+        )
+        .bind(
+          archivedAt,
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          record.expectedVersion + 1,
+        ),
+      binding
+        .prepare(
+          `UPDATE source_file
+           SET status = 'archived'
+           WHERE package_id = ? AND project_id = ? AND review_case_id = ?
+             AND status = 'active'
+             AND EXISTS (
+               SELECT 1 FROM source_package sp
+               WHERE sp.id = source_file.package_id AND sp.status = 'aborted'
+                 AND sp.version = ?
+             )`,
+        )
+        .bind(
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          record.expectedVersion + 1,
+        ),
+      binding
+        .prepare(
+          `INSERT INTO audit_event
+             (id, project_id, actor_id, action, target_type, target_id,
+              payload_json, request_id, created_at)
+           SELECT ?, sp.project_id, ?, 'source_package.aborted',
+                  'source_package', sp.id, ?, ?, ?
+           FROM source_package sp
+           WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ?
+             AND sp.status = 'aborted' AND sp.version = ?`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          record.actor.id,
+          JSON.stringify({
+            previousStatus: row.status,
+            fileCount: row.file_count,
+            storedFileCount: row.stored_file_count,
+            deletionMode: 'soft_abort',
+          }),
+          record.requestId,
+          archivedAt,
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          record.expectedVersion + 1,
+        ),
+    ]);
+    if (results[0].meta.changes !== 1 || results[3].meta.changes !== 1) {
+      throw new SourcePackageConflictError(
+        '등록 자료 상태가 변경되었습니다. 저장 내역을 새로고침해 주세요.',
+      );
+    }
+    return {
+      id: record.packageId,
+      status: 'aborted',
+      deletionMode: 'soft_abort',
+      retainedForAudit: true,
+    };
   }
 
   async create(record: NewSourcePackageRecord): Promise<SourcePackageSummary> {
@@ -411,7 +590,14 @@ export class D1SourcePackageRepository
              version = version + 1, updated_at = ?
          WHERE id = ? AND version = ?
            AND (state IN ('created','failed')
-             OR (state = 'uploading' AND updated_at <= ?))`,
+             OR (state = 'uploading' AND updated_at <= ?))
+           AND EXISTS (
+             SELECT 1 FROM source_package sp
+             WHERE sp.id = upload_attempt.package_id
+               AND sp.project_id = upload_attempt.project_id
+               AND sp.review_case_id = upload_attempt.review_case_id
+               AND sp.status <> 'aborted'
+           )`,
       )
       .bind(requestId, now, uploadId, raw.version, now - UPLOAD_CLAIM_LEASE_MS)
       .run();
@@ -713,7 +899,7 @@ export class D1SourcePackageRepository
       binding
         .prepare(
           `SELECT sp.id, sp.project_id, sp.review_case_id, sp.display_name,
-                  sp.request_hash, sp.status, sp.project_identity_status, sp.created_at
+                  sp.request_hash, sp.status, sp.project_identity_status, sp.version, sp.created_at
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN project p ON p.id = sp.project_id
@@ -777,6 +963,7 @@ export class D1SourcePackageRepository
     const files = (filesRaw as D1Result<ExistingFileRow>).results ?? [];
     return {
       id: packageRow.id,
+      version: packageRow.version,
       projectId: packageRow.project_id,
       reviewCaseId: packageRow.review_case_id,
       displayName: packageRow.display_name,
@@ -839,6 +1026,7 @@ function summaryFromRecord(
 ): SourcePackageSummary {
   return {
     id: record.id,
+    version: 1,
     projectId: record.projectId,
     reviewCaseId: record.reviewCaseId,
     displayName: record.displayName,

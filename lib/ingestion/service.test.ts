@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Actor } from '@/lib/domain/contracts';
 import type { SourcePackageSummary } from './contracts';
 import type {
+  ArchiveSourcePackageRecord,
   NewSourcePackageRecord,
   SourcePackageRepository,
 } from './repository';
@@ -28,6 +29,36 @@ describe('SourcePackageService', () => {
     expect(repository.listCalls).toEqual([
       { projectId, reviewCaseId, actorId: actor.id },
     ]);
+  });
+
+  it('archives an exact version of an actor-scoped source package', async () => {
+    const repository = new CapturingRepository();
+    const service = new SourcePackageService(
+      repository,
+      () => new Date('2026-09-02T00:00:00.000Z'),
+    );
+
+    await expect(
+      service.archive(
+        projectId,
+        reviewCaseId,
+        '44444444-4444-4444-8444-444444444444',
+        2,
+        actor,
+        'request-archive',
+      ),
+    ).resolves.toMatchObject({
+      status: 'aborted',
+      deletionMode: 'soft_abort',
+      retainedForAudit: true,
+    });
+    expect(repository.archiveCalls[0]).toMatchObject({
+      projectId,
+      reviewCaseId,
+      expectedVersion: 2,
+      actor,
+      requestId: 'request-archive',
+    });
   });
 
   it('creates opaque upload intents for normalized 산출서와 집계표 declarations', async () => {
@@ -249,6 +280,7 @@ describe('SourcePackageService', () => {
 
 class CapturingRepository implements SourcePackageRepository {
   readonly records: NewSourcePackageRecord[] = [];
+  readonly archiveCalls: ArchiveSourcePackageRecord[] = [];
   readonly listCalls: Array<{
     projectId: string;
     reviewCaseId: string;
@@ -272,6 +304,7 @@ class CapturingRepository implements SourcePackageRepository {
     this.records.push(record);
     return Promise.resolve({
       id: record.id,
+      version: 1,
       projectId: record.projectId,
       reviewCaseId: record.reviewCaseId,
       displayName: record.displayName,
@@ -288,6 +321,16 @@ class CapturingRepository implements SourcePackageRepository {
         status: file.status,
       })),
       createdAt: record.createdAt.toISOString(),
+    });
+  }
+
+  archive(record: ArchiveSourcePackageRecord) {
+    this.archiveCalls.push(record);
+    return Promise.resolve({
+      id: record.packageId,
+      status: 'aborted' as const,
+      deletionMode: 'soft_abort' as const,
+      retainedForAudit: true as const,
     });
   }
 }

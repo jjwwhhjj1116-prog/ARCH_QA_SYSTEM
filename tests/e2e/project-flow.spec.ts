@@ -310,6 +310,34 @@ test('project page exposes the full Korean workflow and persists a new project',
   const otherCasePackage = await sameKeyOtherCase.json();
   expect(otherCasePackage.data.reviewCaseId).toBe(secondCaseId);
   expect(otherCasePackage.data.id).not.toBe(packageBody.data.id);
+  const archiveResponse = await page.request.delete(
+    `/api/projects/${projectId}/cases/${secondCaseId}/source-packages/${otherCasePackage.data.id}`,
+    {
+      headers: {
+        'if-match': `"${otherCasePackage.data.version}"`,
+        'sec-fetch-site': 'same-origin',
+      },
+    },
+  );
+  expect(archiveResponse.status()).toBe(200);
+  expect((await archiveResponse.json()).data).toMatchObject({
+    id: otherCasePackage.data.id,
+    status: 'aborted',
+    deletionMode: 'soft_abort',
+    retainedForAudit: true,
+  });
+  const archivedListResponse = await page.request.get(
+    `/api/projects/${projectId}/cases/${secondCaseId}/source-packages`,
+  );
+  expect(archivedListResponse.status()).toBe(200);
+  const archivedList = (await archivedListResponse.json()).data as Array<{
+    id: string;
+  }>;
+  expect(
+    archivedList.some(
+      (sourcePackage) => sourcePackage.id === otherCasePackage.data.id,
+    ),
+  ).toBe(false);
   const mixedScope = await page.request.post(
     `/api/projects/99999999-9999-4999-8999-999999999999/cases/${caseId}/source-packages`,
     {
@@ -378,10 +406,10 @@ test('mobile navigation opens with readable text labels', async ({
     'true',
   );
   await expect(
-    page.getByRole('navigation').getByText('프로젝트 등록'),
+    page.getByRole('navigation').getByText('새 프로젝트'),
   ).toBeVisible();
   await expect(
-    page.getByRole('navigation').getByText('산출식 AI 검수'),
+    page.getByRole('navigation').getByText('프로젝트 목록'),
   ).toBeVisible();
   const closeButton = page.getByRole('button', { name: '메뉴 닫기' }).first();
   await expect(closeButton).toBeFocused();

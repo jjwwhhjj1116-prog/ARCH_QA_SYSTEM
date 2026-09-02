@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe('ReviewStudio', () => {
-  it('uses the official title, exact navigation, and source wording', async () => {
+  it('uses the official title, project sidebar, three-step workflow, and source wording', async () => {
     mockProjects([]);
     renderStudio();
     expect(
@@ -23,17 +23,16 @@ describe('ReviewStudio', () => {
         selector: '.topbar-title strong',
       }),
     ).toBeVisible();
-    const navigation = screen.getByRole('navigation', { name: 'QC 업무 단계' });
-    for (const label of [
-      '프로젝트 등록',
-      '프로젝트 자료',
-      '산출식 AI 검수',
-      '중복 아이템 AI 검수',
-      '수량산출 분석표',
-      '설정',
-    ]) {
-      expect(within(navigation).getByText(label)).toBeVisible();
-    }
+    const navigation = screen.getByRole('navigation', { name: '프로젝트' });
+    expect(within(navigation).getByText('새 프로젝트')).toBeVisible();
+    expect(within(navigation).getByText('프로젝트 목록')).toBeVisible();
+    expect(within(navigation).getByText('설정')).toBeVisible();
+    const workflow = screen.getByRole('region', { name: '검수 진행 단계' });
+    expect(within(workflow).getByText(/STEP 1 · 자료 등록/u)).toBeVisible();
+    expect(within(workflow).getByText(/STEP 2 · AI 검수/u)).toBeVisible();
+    expect(
+      within(workflow).getByText(/STEP 3 · 수량산출 분석표/u),
+    ).toBeVisible();
     await screen.findByText('첫 검수 프로젝트를 등록하세요');
     expect(screen.getByText(/산출서와 집계표/u)).toBeVisible();
     expect(document.querySelectorAll('.brand-logo')).toHaveLength(2);
@@ -60,6 +59,34 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
     expect(screen.getByText('PROJECT SELECTOR · RAG STATUS')).toBeVisible();
     expect(screen.getByLabelText('전체 프로젝트 목록')).toBeVisible();
+  });
+
+  it('asks once before project deletion without requiring the project name', async () => {
+    const project = projectFixture('P100', '삭제 확인 프로젝트');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects' && !init?.method)
+        return jsonResponse([project]);
+      if (url === `/api/projects/${project.id}` && init?.method === 'DELETE')
+        return jsonResponse({
+          ...project,
+          status: 'archived',
+          deletionMode: 'archive',
+        });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /삭제 확인 프로젝트/u });
+    fireEvent.click(within(row).getByRole('button', { name: '삭제' }));
+    const dialog = screen.getByRole('dialog', {
+      name: '프로젝트를 목록에서 삭제할까요?',
+    });
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() =>
+      expect(screen.queryByText('삭제 확인 프로젝트')).toBeNull(),
+    );
   });
 
   it('supports both search and dropdown selection without changing the project before confirmation', async () => {
@@ -268,6 +295,9 @@ describe('ReviewStudio', () => {
     expect(screen.getByText('원본 저장 완료')).toBeVisible();
     expect(screen.getByText('1/1개 저장 ·', { exact: false })).toBeVisible();
     expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+    ).toBeVisible();
     expect(packageListCalls).toBe(2);
   });
 
@@ -343,6 +373,63 @@ describe('ReviewStudio', () => {
     expect(
       screen.getByRole('button', { name: '원본 검사 후 다시 저장' }),
     ).toBeEnabled();
+  });
+
+  it('removes a failed source package from the normal list after one confirmation', async () => {
+    const project = projectFixture('P100', '웹 검수 프로젝트');
+    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
+    const failedPackage = sourcePackageFixture({
+      projectId: project.id,
+      reviewCaseId: reviewCase.id,
+      status: 'upload_pending',
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url === `/api/projects/${project.id}/cases`)
+        return jsonResponse([reviewCase]);
+      if (
+        url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
+        !init?.method
+      )
+        return jsonResponse([failedPackage]);
+      if (
+        url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages/${failedPackage.id}` &&
+        init?.method === 'DELETE'
+      )
+        return jsonResponse({
+          id: failedPackage.id,
+          status: 'aborted',
+          deletionMode: 'archive',
+        });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
+    );
+    const packageList = await screen.findByRole('list', {
+      name: /웹 검수 프로젝트 산출서와 집계표/u,
+    });
+    fireEvent.click(
+      within(packageList.closest('li')!).getByRole('button', { name: '삭제' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText(/등록 자료 묶음을 목록에서 삭제했습니다/u),
+      ).toBeVisible(),
+    );
+    expect(
+      screen.getByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.'),
+    ).toBeVisible();
   });
 
   it('continues after one blocked workbook and stores the remaining files', async () => {
@@ -484,17 +571,50 @@ describe('ReviewStudio', () => {
     expect(screen.getAllByText('공용집계표.csv').length).toBeGreaterThan(0);
   });
 
-  it('exposes expandable structure and finish analysis groups', async () => {
-    mockProjects([]);
+  it('keeps overview and structure analysis disabled while finish analysis is available', async () => {
+    const project = projectFixture('P100', '웹 검수 프로젝트');
+    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url === `/api/projects/${project.id}/cases`)
+        return jsonResponse([reviewCase]);
+      if (
+        url ===
+        `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
+      )
+        return jsonResponse([
+          sourcePackageFixture({
+            projectId: project.id,
+            reviewCaseId: reviewCase.id,
+            status: 'stored',
+          }),
+        ]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
     renderStudio();
-    await screen.findByText('첫 검수 프로젝트를 등록하세요');
-    const analysis = screen.getByRole('button', { name: /수량산출 분석표/u });
-    expect(analysis).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('면적 분석표(내부)')).toBeVisible();
-    expect(screen.getByText('아파트옹벽')).toBeVisible();
-    fireEvent.click(analysis);
-    expect(analysis).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('면적 분석표(내부)')).toBeNull();
+    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
+    );
+    await screen.findByText('원본 저장 완료');
+    fireEvent.click(
+      screen.getByRole('button', { name: /STEP 3 · 수량산출 분석표/u }),
+    );
+
+    expect(screen.getByRole('button', { name: /분석표 개요/u })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /구조팀/u })).toBeDisabled();
+    for (const label of [
+      '마감 · 내부',
+      '마감 · 외부',
+      '마감 · 조적',
+      '마감 · 창호',
+    ]) {
+      expect(screen.getByRole('button', { name: label })).toBeEnabled();
+    }
   });
 
   it('does not show a stale case response after switching projects', async () => {
@@ -634,6 +754,7 @@ function sourcePackageFixture({
 }) {
   return {
     id: packageId,
+    version: 1,
     projectId,
     reviewCaseId,
     displayName: '웹 검수 프로젝트 산출서와 집계표',

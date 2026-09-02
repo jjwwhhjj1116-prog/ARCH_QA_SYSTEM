@@ -13,6 +13,8 @@ import {
   type SourcePackageSummary,
 } from './contracts';
 import type {
+  ArchivedSourcePackageSummary,
+  ArchiveSourcePackageRecord,
   NewSourceUploadIntentRecord,
   SourcePackageRepository,
 } from './repository';
@@ -29,6 +31,26 @@ export class SourcePackageService {
     actor: Actor,
   ): Promise<SourcePackageSummary[]> {
     return this.repository.listForActor(projectId, reviewCaseId, actor.id);
+  }
+
+  archive(
+    projectId: string,
+    reviewCaseId: string,
+    packageId: string,
+    expectedVersion: number,
+    actor: Actor,
+    requestId: string,
+  ): Promise<ArchivedSourcePackageSummary> {
+    const record: ArchiveSourcePackageRecord = {
+      projectId,
+      reviewCaseId,
+      packageId,
+      expectedVersion,
+      actor,
+      requestId,
+      archivedAt: this.now(),
+    };
+    return this.repository.archive(record);
   }
 
   async create(

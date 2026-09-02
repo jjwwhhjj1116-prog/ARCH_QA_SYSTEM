@@ -2,12 +2,20 @@
 
 import {
   AlertTriangle,
+  BarChart3,
+  Check,
   ChevronDown,
-  ChevronRight,
   Download,
+  FileScan,
+  FileSpreadsheet,
+  FolderKanban,
+  FolderPlus,
   Link2Off,
+  Layers3,
   Menu,
   RefreshCcw,
+  Search,
+  Settings,
   UserRound,
   X,
 } from 'lucide-react';
@@ -30,12 +38,7 @@ import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ProjectRegistrationWorkspace } from './project-registration-workspace';
-import {
-  ModuleWorkspace,
-  studioNavigation,
-  type StudioNavigationNode,
-  type StudioView,
-} from './review-modules';
+import { ModuleWorkspace, type StudioView } from './review-modules';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type MessageTone = 'neutral' | 'success' | 'error';
@@ -67,9 +70,6 @@ export function ReviewStudio({
   );
   const [mobileNav, setMobileNav] = useState(false);
   const [activeView, setActiveView] = useState<StudioView>('project-register');
-  const [expandedGroups, setExpandedGroups] = useState(
-    () => new Set(['analysis-group', 'structure-group', 'finish-group']),
-  );
   const [query, setQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
@@ -91,6 +91,10 @@ export function ReviewStudio({
   const [sourcePackageState, setSourcePackageState] =
     useState<LoadState>('ready');
   const [sourcePackageError, setSourcePackageError] = useState('');
+  const [deletingSourcePackageId, setDeletingSourcePackageId] = useState<
+    string | null
+  >(null);
+  const [hasStoredSources, setHasStoredSources] = useState(false);
   const uploadKeyRef = useRef<string | null>(null);
   const sourcePackageScopeRef = useRef<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -125,6 +129,7 @@ export function ReviewStudio({
       setSourcePackages([]);
       setSourcePackageState('ready');
       setSourcePackageError('');
+      setHasStoredSources(false);
       uploadKeyRef.current = null;
       sourcePackageScopeRef.current = null;
     }
@@ -335,6 +340,7 @@ export function ReviewStudio({
         }
         if (sourcePackageScopeRef.current !== scope) return null;
         setSourcePackages(body.data);
+        if (body.data.some(isFullyStoredPackage)) setHasStoredSources(true);
         setSourcePackageState('ready');
         return body.data;
       } catch (error) {
@@ -561,6 +567,7 @@ export function ReviewStudio({
         `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
       );
       setUploadStatus('success');
+      setHasStoredSources(true);
       setMessageTone('success');
       setMessage(
         `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
@@ -598,14 +605,13 @@ export function ReviewStudio({
 
   async function archiveProject(
     project: ProjectSummary,
-    confirmationName: string,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     setArchivingProjectId(project.id);
     try {
       const response = await fetch(`/api/projects/${project.id}`, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmationName }),
+        body: JSON.stringify({ confirmationName: project.name }),
       });
       const body = (await response.json()) as
         | ApiSuccessEnvelope<ProjectSummary & { deletionMode: 'archive' }>
@@ -641,6 +647,56 @@ export function ReviewStudio({
       return { ok: false, message: failureMessage };
     } finally {
       setArchivingProjectId(null);
+    }
+  }
+
+  async function archiveSourcePackage(
+    sourcePackage: SourcePackageSummary,
+  ): Promise<void> {
+    if (!selectedProject || sourcePackage.reviewCaseId !== uploadCaseId) return;
+    if (
+      !window.confirm(
+        `${sourcePackage.displayName} 등록 건을 정말 삭제할까요?\n목록에서는 사라지지만 감사 이력은 보관됩니다.`,
+      )
+    )
+      return;
+    setDeletingSourcePackageId(sourcePackage.id);
+    try {
+      const response = await fetch(
+        `/api/projects/${selectedProject.id}/cases/${sourcePackage.reviewCaseId}/source-packages/${sourcePackage.id}`,
+        {
+          method: 'DELETE',
+          headers: { 'if-match': `"${sourcePackage.version}"` },
+        },
+      );
+      const body = (await response.json()) as
+        | ApiSuccessEnvelope<{ id: string; deletionMode: 'soft_abort' }>
+        | ApiErrorEnvelope;
+      if (!response.ok || 'error' in body) {
+        throw new Error(
+          'error' in body
+            ? body.error.message
+            : '등록 자료 묶음을 삭제하지 못했습니다.',
+        );
+      }
+      const remaining = sourcePackages.filter(
+        (item) => item.id !== sourcePackage.id,
+      );
+      setSourcePackages(remaining);
+      setHasStoredSources(remaining.some(isFullyStoredPackage));
+      setMessageTone('success');
+      setMessage(
+        '등록 자료 묶음을 목록에서 삭제했습니다. 원본과 감사 이력은 안전하게 보관했습니다.',
+      );
+    } catch (error) {
+      setMessageTone('error');
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : '등록 자료 묶음을 삭제하지 못했습니다.',
+      );
+    } finally {
+      setDeletingSourcePackageId(null);
     }
   }
 
@@ -688,16 +744,7 @@ export function ReviewStudio({
     }
   }
 
-  function toggleGroup(id: string) {
-    setExpandedGroups((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const stage = findNavigationStage(studioNavigation, activeView);
+  const stage = workflowStage(activeView);
 
   return (
     <div className="studio-shell" data-current-stage={stage?.tone ?? 'neutral'}>
@@ -730,18 +777,62 @@ export function ReviewStudio({
           <strong>CONCOST 기술본부 QC 스튜디오</strong>
           <span>QUANTITY CONTROL WORKSPACE</span>
         </div>
-        <nav className="primary-nav" aria-label="QC 업무 단계">
-          {studioNavigation.map((node) => (
-            <NavigationNode
-              key={node.id}
-              node={node}
-              activeView={activeView}
-              expandedGroups={expandedGroups}
-              onNavigate={navigate}
-              onToggleGroup={toggleGroup}
-              attentionCount={selectedProject?.needsAttentionCount ?? 0}
+        <nav className="primary-nav project-sidebar-nav" aria-label="프로젝트">
+          <button
+            className="sidebar-project-add"
+            type="button"
+            onClick={() => {
+              setShowCreate(true);
+              navigate('project-register');
+            }}
+          >
+            <FolderPlus aria-hidden="true" /> 새 프로젝트
+          </button>
+          <div className="sidebar-project-heading">
+            <span>프로젝트 목록</span>
+            <strong>{projects.length}</strong>
+          </div>
+          <label className="sidebar-project-search">
+            <Search aria-hidden="true" />
+            <span className="sr-only">좌측 프로젝트 검색</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="프로젝트 검색"
             />
-          ))}
+          </label>
+          <div className="sidebar-project-list">
+            {visibleProjects.map((project) => (
+              <button
+                key={project.id}
+                className={
+                  selectedProjectId === project.id ? 'is-current' : undefined
+                }
+                type="button"
+                aria-current={
+                  selectedProjectId === project.id ? 'true' : undefined
+                }
+                onClick={() => selectProject(project.id)}
+              >
+                <FolderKanban aria-hidden="true" />
+                <span>
+                  <strong>{project.name}</strong>
+                  <small>{project.clientName || 'ERP 연동 대기'}</small>
+                </span>
+              </button>
+            ))}
+            {loadState === 'ready' && visibleProjects.length === 0 && (
+              <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
+            )}
+          </div>
+          <button
+            className={`sidebar-settings${activeView === 'settings' ? ' is-current' : ''}`}
+            type="button"
+            onClick={() => navigate('settings')}
+          >
+            <Settings aria-hidden="true" /> 설정
+          </button>
         </nav>
         <div className="sidebar-foot">
           <div className="employee-profile">
@@ -797,7 +888,7 @@ export function ReviewStudio({
             <span>물량산출 완료 후 PM·팀별 검수 워크스페이스</span>
           </div>
           <div className="stage-indicator" aria-label="현재 업무 단계">
-            <span>{stage?.stage ? `${stage.stage} / 5` : '설정'}</span>
+            <span>{stage?.stage ? `${stage.stage} / 3` : '설정'}</span>
             <strong>{stage?.label ?? '프로젝트 등록'}</strong>
           </div>
           <div className="project-switcher">
@@ -849,6 +940,15 @@ export function ReviewStudio({
           </div>
         </header>
 
+        {activeView !== 'settings' && (
+          <WorkflowRail
+            activeView={activeView}
+            hasSelectedProject={Boolean(selectedProject)}
+            hasStoredSources={hasStoredSources}
+            onNavigate={navigate}
+          />
+        )}
+
         <main
           id="main-content"
           className="main-layout"
@@ -896,6 +996,7 @@ export function ReviewStudio({
               sourcePackages={sourcePackages}
               sourcePackageState={sourcePackageState}
               sourcePackageError={sourcePackageError}
+              deletingSourcePackageId={deletingSourcePackageId}
               message={message}
               messageTone={messageTone}
               onOpenRegistration={() => navigate('project-register')}
@@ -909,6 +1010,13 @@ export function ReviewStudio({
                 if (selectedProject && uploadCaseId) {
                   void loadSourcePackages(selectedProject.id, uploadCaseId);
                 }
+              }}
+              onArchiveSourcePackage={(sourcePackage) =>
+                void archiveSourcePackage(sourcePackage)
+              }
+              onContinueToAiReview={() => {
+                closeSourceUpload();
+                navigate('formula-ai');
               }}
               onUpload={(event) => void uploadSources(event)}
             />
@@ -926,109 +1034,169 @@ export function ReviewStudio({
   );
 }
 
-function NavigationNode({
-  node,
+function WorkflowRail({
   activeView,
-  expandedGroups,
+  hasSelectedProject,
+  hasStoredSources,
   onNavigate,
-  onToggleGroup,
-  attentionCount,
-  depth = 0,
 }: {
-  node: StudioNavigationNode;
   activeView: StudioView;
-  expandedGroups: Set<string>;
+  hasSelectedProject: boolean;
+  hasStoredSources: boolean;
   onNavigate: (view: StudioView) => void;
-  onToggleGroup: (id: string) => void;
-  attentionCount: number;
-  depth?: number;
 }) {
-  if (node.kind === 'item') {
-    const active = node.id === activeView;
-    return (
-      <button
-        className={`nav-item nav-depth-${depth}${active ? ' is-active' : ''}`}
-        data-tone={node.tone}
-        type="button"
-        aria-current={active ? 'page' : undefined}
-        onClick={() => onNavigate(node.id)}
-      >
-        <node.icon aria-hidden="true" />
-        {node.stage && <span className="nav-step-number">{node.stage}</span>}
-        <span className="nav-label">{node.label}</span>
-        {node.id === 'formula-ai' && attentionCount > 0 && (
-          <small>{attentionCount}</small>
-        )}
-      </button>
-    );
-  }
-  const expanded = expandedGroups.has(node.id);
-  const active = navigationContains(node, activeView);
+  const activeStep = workflowStage(activeView)?.stage ?? 1;
+  const steps = [
+    {
+      number: 1,
+      label: '자료 등록',
+      description: '프로젝트 · 산출서 · 집계표',
+      icon: FileSpreadsheet,
+      disabled: false,
+      target: hasSelectedProject ? 'project-data' : 'project-register',
+    },
+    {
+      number: 2,
+      label: 'AI 검수',
+      description: '산출식 이상치 · 중복 ITEM',
+      icon: FileScan,
+      disabled: !hasSelectedProject || !hasStoredSources,
+      target: 'formula-ai',
+    },
+    {
+      number: 3,
+      label: '수량산출 분석표',
+      description: '마감팀 분석표 우선',
+      icon: BarChart3,
+      disabled: !hasSelectedProject || !hasStoredSources,
+      target: 'analysis-finish-interior',
+    },
+  ] as const;
+  const analysisActive = activeStep === 3;
   return (
-    <div
-      className={`nav-group nav-depth-${depth}${active ? ' is-active' : ''}`}
-      data-tone={node.tone}
-    >
-      <button
-        className="nav-group-trigger"
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => {
-          onToggleGroup(node.id);
-          if (node.defaultView) onNavigate(node.defaultView);
-        }}
-      >
-        <node.icon aria-hidden="true" />
-        {node.stage && <span className="nav-step-number">{node.stage}</span>}
-        <span className="nav-label">{node.label}</span>
-        <ChevronRight
-          className={expanded ? 'is-expanded' : ''}
-          aria-hidden="true"
-        />
-      </button>
-      {expanded && (
-        <div className="nav-group-children">
-          {node.children.map((child) => (
-            <NavigationNode
-              key={child.id}
-              node={child}
-              activeView={activeView}
-              expandedGroups={expandedGroups}
-              onNavigate={onNavigate}
-              onToggleGroup={onToggleGroup}
-              attentionCount={attentionCount}
-              depth={depth + 1}
-            />
-          ))}
+    <section className="workflow-rail" aria-labelledby="workflow-title">
+      <div className="workflow-rail-heading">
+        <div>
+          <span>QC WORKFLOW</span>
+          <strong id="workflow-title">검수 진행 단계</strong>
         </div>
+        {!hasStoredSources && hasSelectedProject && (
+          <small>STEP 2부터는 자료 저장 완료 후 열립니다.</small>
+        )}
+      </div>
+      <ol>
+        {steps.map((step) => {
+          const current = activeStep === step.number;
+          const completed =
+            step.number === 1 ? hasStoredSources : step.number < activeStep;
+          return (
+            <li
+              key={step.number}
+              data-state={
+                current ? 'current' : completed ? 'complete' : 'waiting'
+              }
+            >
+              <button
+                type="button"
+                disabled={step.disabled}
+                aria-current={current ? 'step' : undefined}
+                aria-describedby={
+                  step.disabled
+                    ? `workflow-step-${step.number}-reason`
+                    : undefined
+                }
+                onClick={() => onNavigate(step.target)}
+              >
+                <span className="workflow-step-number">
+                  {completed && !current ? (
+                    <Check aria-hidden="true" />
+                  ) : (
+                    `0${step.number}`
+                  )}
+                </span>
+                <span>
+                  <strong>
+                    STEP {step.number} · {step.label}
+                  </strong>
+                  <small id={`workflow-step-${step.number}-reason`}>
+                    {step.disabled ? '자료 등록 필요' : step.description}
+                  </small>
+                </span>
+                <step.icon aria-hidden="true" />
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {activeStep === 2 && (
+        <nav className="workflow-subnav" aria-label="AI 검수 종류">
+          <button
+            className={activeView === 'formula-ai' ? 'is-active' : undefined}
+            type="button"
+            aria-current={activeView === 'formula-ai' ? 'page' : undefined}
+            onClick={() => onNavigate('formula-ai')}
+          >
+            <FileScan aria-hidden="true" /> 산출식 이상치
+          </button>
+          <button
+            className={activeView === 'duplicate-ai' ? 'is-active' : undefined}
+            type="button"
+            aria-current={activeView === 'duplicate-ai' ? 'page' : undefined}
+            onClick={() => onNavigate('duplicate-ai')}
+          >
+            <Layers3 aria-hidden="true" /> 중복 ITEM
+          </button>
+        </nav>
       )}
-    </div>
+      {analysisActive && (
+        <nav
+          className="workflow-subnav analysis-subnav"
+          aria-label="분석표 종류"
+        >
+          <button type="button" disabled>
+            분석표 개요 <small>준비 중</small>
+          </button>
+          <button type="button" disabled>
+            구조팀 <small>준비 중</small>
+          </button>
+          {[
+            ['analysis-finish-interior', '마감 · 내부'],
+            ['analysis-finish-exterior', '마감 · 외부'],
+            ['analysis-finish-masonry', '마감 · 조적'],
+            ['analysis-finish-window', '마감 · 창호'],
+          ].map(([view, label]) => (
+            <button
+              key={view}
+              className={activeView === view ? 'is-active' : undefined}
+              type="button"
+              aria-current={activeView === view ? 'page' : undefined}
+              onClick={() => onNavigate(view as StudioView)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+    </section>
   );
 }
 
-function navigationContains(
-  node: StudioNavigationNode,
-  view: StudioView,
-): boolean {
-  if (node.kind === 'item') return node.id === view;
-  return node.children.some((child) => navigationContains(child, view));
-}
-
-function findNavigationStage(
-  nodes: readonly StudioNavigationNode[],
+function workflowStage(
   view: StudioView,
 ): { label: string; stage: number | null; tone: string } | null {
-  for (const node of nodes) {
-    if (node.kind === 'item' && node.id === view)
-      return { label: node.label, stage: node.stage, tone: node.tone };
-    if (node.kind === 'group') {
-      const found = findNavigationStage(node.children, view);
-      if (found) return found;
-      if (node.defaultView === view)
-        return { label: node.label, stage: node.stage, tone: node.tone };
-    }
-  }
-  return null;
+  if (view === 'settings') return { label: '설정', stage: null, tone: 'slate' };
+  if (view === 'project-register' || view === 'project-data')
+    return { label: '자료 등록', stage: 1, tone: 'blue' };
+  if (view === 'formula-ai' || view === 'duplicate-ai')
+    return { label: 'AI 검수', stage: 2, tone: 'violet' };
+  return { label: '수량산출 분석표', stage: 3, tone: 'emerald' };
+}
+
+function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
+  return (
+    sourcePackage.files.length > 0 &&
+    sourcePackage.files.every((file) => file.status === 'stored')
+  );
 }
 
 function declaredContentType(file: File): string {

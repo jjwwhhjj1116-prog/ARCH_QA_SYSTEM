@@ -59,6 +59,7 @@ export type SourceUploadIntentSummary = {
 
 export type SourcePackageSummary = {
   id: string;
+  version: number;
   projectId: string;
   reviewCaseId: string;
   displayName: string;
