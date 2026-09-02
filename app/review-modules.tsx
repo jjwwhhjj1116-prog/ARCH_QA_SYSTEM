@@ -8,59 +8,242 @@ import {
   FileSpreadsheet,
   FolderKanban,
   Layers3,
-  LayoutDashboard,
   LockKeyhole,
   Ruler,
+  Settings,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useState } from 'react';
-import type { ProjectSummary, ReviewCaseSummary } from '@/lib/domain/contracts';
+import { useEffect, useState } from 'react';
+import type {
+  ApiErrorEnvelope,
+  ApiSuccessEnvelope,
+  ProjectSummary,
+  ReviewCaseSummary,
+} from '@/lib/domain/contracts';
+import type { GeminiConfigurationStatus } from '@/lib/server/ai/gemini-config';
+
+export type StructureAnalysisView =
+  | 'analysis-structure-beam'
+  | 'analysis-structure-slab'
+  | 'analysis-structure-column'
+  | 'analysis-structure-retaining-wall'
+  | 'analysis-structure-foundation'
+  | 'analysis-structure-apartment-retaining-wall'
+  | 'analysis-structure-apartment-slab';
+
+export type FinishAnalysisView =
+  | 'analysis-finish-window'
+  | 'analysis-finish-interior'
+  | 'analysis-finish-exterior'
+  | 'analysis-finish-masonry';
+
+export type TradeAnalysisView = StructureAnalysisView | FinishAnalysisView;
 
 export type StudioView =
-  | 'overview'
-  | 'projects'
-  | 'formula'
-  | 'duplicates'
-  | 'area'
-  | 'discipline'
-  | 'reports';
+  | 'project-register'
+  | 'project-data'
+  | 'formula-ai'
+  | 'duplicate-ai'
+  | 'analysis'
+  | TradeAnalysisView
+  | 'settings';
+
+export type StageTone =
+  | 'cyan'
+  | 'blue'
+  | 'amber'
+  | 'violet'
+  | 'emerald'
+  | 'slate';
+
+export type StageNumber = 1 | 2 | 3 | 4 | 5;
+
+export type StudioNavigationLeaf = {
+  kind: 'item';
+  id: StudioView;
+  label: string;
+  icon: LucideIcon;
+  stage: StageNumber | null;
+  tone: StageTone;
+};
+
+export type StudioNavigationGroup = {
+  kind: 'group';
+  id: 'analysis-group' | 'structure-group' | 'finish-group';
+  label: string;
+  icon: LucideIcon;
+  stage: StageNumber;
+  tone: StageTone;
+  defaultView?: StudioView;
+  children: readonly StudioNavigationNode[];
+};
+
+export type StudioNavigationNode = StudioNavigationLeaf | StudioNavigationGroup;
+
+function navigationLeaf(
+  id: TradeAnalysisView,
+  label: string,
+): StudioNavigationLeaf {
+  return {
+    kind: 'item',
+    id,
+    label,
+    icon: Building2,
+    stage: 5,
+    tone: 'emerald',
+  };
+}
 
 export const studioNavigation = [
-  { id: 'overview', label: '종합 대시보드', icon: LayoutDashboard },
-  { id: 'projects', label: '프로젝트·자료', icon: FolderKanban },
-  { id: 'formula', label: '산출식 이상치', icon: FileScan },
-  { id: 'duplicates', label: '중복 아이템', icon: Layers3 },
-  { id: 'area', label: '면적 분석표', icon: Ruler },
-  { id: 'discipline', label: '공종별 검수', icon: Building2 },
-  { id: 'reports', label: '보고서·Excel', icon: BarChart3 },
-] as const;
+  {
+    kind: 'item',
+    id: 'project-register',
+    label: '프로젝트 등록',
+    icon: FolderKanban,
+    stage: 1,
+    tone: 'cyan',
+  },
+  {
+    kind: 'item',
+    id: 'project-data',
+    label: '프로젝트 자료',
+    icon: FileSpreadsheet,
+    stage: 2,
+    tone: 'blue',
+  },
+  {
+    kind: 'item',
+    id: 'formula-ai',
+    label: '산출식 AI 검수',
+    icon: FileScan,
+    stage: 3,
+    tone: 'amber',
+  },
+  {
+    kind: 'item',
+    id: 'duplicate-ai',
+    label: '중복 아이템 AI 검수',
+    icon: Layers3,
+    stage: 4,
+    tone: 'violet',
+  },
+  {
+    kind: 'group',
+    id: 'analysis-group',
+    label: '수량산출 분석표',
+    icon: BarChart3,
+    stage: 5,
+    tone: 'emerald',
+    defaultView: 'analysis',
+    children: [
+      {
+        kind: 'item',
+        id: 'analysis',
+        label: '분석표 개요',
+        icon: Ruler,
+        stage: 5,
+        tone: 'emerald',
+      },
+      {
+        kind: 'group',
+        id: 'structure-group',
+        label: '구조',
+        icon: Building2,
+        stage: 5,
+        tone: 'emerald',
+        children: [
+          navigationLeaf('analysis-structure-beam', '보'),
+          navigationLeaf('analysis-structure-slab', '슬라브'),
+          navigationLeaf('analysis-structure-column', '기둥'),
+          navigationLeaf('analysis-structure-retaining-wall', '옹벽'),
+          navigationLeaf('analysis-structure-foundation', '기초'),
+          navigationLeaf('analysis-structure-apartment-slab', '아파트슬라브'),
+          navigationLeaf(
+            'analysis-structure-apartment-retaining-wall',
+            '아파트옹벽',
+          ),
+        ],
+      },
+      {
+        kind: 'group',
+        id: 'finish-group',
+        label: '마감',
+        icon: FileSpreadsheet,
+        stage: 5,
+        tone: 'emerald',
+        children: [
+          navigationLeaf('analysis-finish-interior', '면적 분석표(내부)'),
+          navigationLeaf('analysis-finish-exterior', '면적 분석표(외부)'),
+          navigationLeaf('analysis-finish-masonry', '수량 분석표(조적)'),
+          navigationLeaf('analysis-finish-window', '수량 분석표(창호)'),
+        ],
+      },
+    ],
+  },
+  {
+    kind: 'item',
+    id: 'settings',
+    label: '설정',
+    icon: Settings,
+    stage: null,
+    tone: 'slate',
+  },
+] as const satisfies readonly StudioNavigationNode[];
+
+type ModuleView = Exclude<StudioView, 'project-register' | 'project-data'>;
 
 type ModuleWorkspaceProps = {
-  view: Exclude<StudioView, 'projects'>;
+  view: ModuleView;
   selectedProject: ProjectSummary | null;
   reviewCases: ReviewCaseSummary[];
   onOpenProjects: () => void;
 };
 
-const structureTrades = [
-  '보',
-  '슬라브',
-  '기둥',
-  '옹벽',
-  '기초',
-  '아파트옹벽',
-  '아파트슬라브',
-] as const;
-const finishTrades = ['조적', '창호', '내부', '외부', '가설'] as const;
+type TradeMetadata = {
+  team: '구조' | '마감';
+  code: 'RC' | 'FIN';
+  trade: string;
+};
+
+const tradeMetadata: Record<TradeAnalysisView, TradeMetadata> = {
+  'analysis-structure-beam': { team: '구조', code: 'RC', trade: '보' },
+  'analysis-structure-slab': { team: '구조', code: 'RC', trade: '슬라브' },
+  'analysis-structure-column': { team: '구조', code: 'RC', trade: '기둥' },
+  'analysis-structure-retaining-wall': {
+    team: '구조',
+    code: 'RC',
+    trade: '옹벽',
+  },
+  'analysis-structure-foundation': {
+    team: '구조',
+    code: 'RC',
+    trade: '기초',
+  },
+  'analysis-structure-apartment-retaining-wall': {
+    team: '구조',
+    code: 'RC',
+    trade: '아파트옹벽',
+  },
+  'analysis-structure-apartment-slab': {
+    team: '구조',
+    code: 'RC',
+    trade: '아파트슬라브',
+  },
+  'analysis-finish-interior': { team: '마감', code: 'FIN', trade: '내부' },
+  'analysis-finish-exterior': { team: '마감', code: 'FIN', trade: '외부' },
+  'analysis-finish-masonry': { team: '마감', code: 'FIN', trade: '조적' },
+  'analysis-finish-window': { team: '마감', code: 'FIN', trade: '창호' },
+};
 
 export function ModuleWorkspace({
   view,
   selectedProject,
-  reviewCases,
   onOpenProjects,
 }: ModuleWorkspaceProps) {
+  if (view === 'settings') return <SettingsWorkspace />;
+
   if (!selectedProject) {
     return (
       <section
@@ -71,8 +254,8 @@ export function ModuleWorkspace({
         <div>
           <h1 id="module-empty-title">검수 프로젝트를 먼저 선택하세요</h1>
           <p>
-            프로젝트 경계를 확정한 뒤 산출서와 집계표를 연결해야 검수 결과가
-            다른 현장과 섞이지 않습니다.
+            프로젝트 경계를 확정하고 산출서와 집계표를 등록해야 다음 단계의
+            결과가 다른 현장과 섞이지 않습니다.
           </p>
         </div>
         <button
@@ -80,105 +263,25 @@ export function ModuleWorkspace({
           type="button"
           onClick={onOpenProjects}
         >
-          프로젝트 선택
+          프로젝트 등록·선택으로 이동
         </button>
       </section>
     );
   }
 
-  if (view === 'overview') {
-    const structureCases = reviewCases.filter(
-      (reviewCase) => reviewCase.discipline === 'RC',
-    ).length;
-    const finishCases = reviewCases.filter(
-      (reviewCase) => reviewCase.discipline === 'FIN',
-    ).length;
-    return (
-      <div className="analytics-workspace">
-        <ModuleHeading
-          title={selectedProject.name}
-          description="물량산출 완료 후 검수 상태를 한 화면에서 확인합니다. 미실행 항목은 정상으로 계산하지 않습니다."
-          status="ERP 프로젝트명 수동 등록 · 연동 대기"
-        />
-        <div className="kpi-grid" aria-label="프로젝트 검수 요약">
-          <KpiCard
-            tone="cyan"
-            label="검수 케이스"
-            value={`${reviewCases.length}`}
-            unit="건"
-            note="구조와 마감을 독립 계보로 관리"
-          />
-          <KpiCard
-            tone="emerald"
-            label="구조 검수"
-            value={`${structureCases}`}
-            unit="건"
-            note="보·슬라브·기둥·옹벽·기초"
-          />
-          <KpiCard
-            tone="amber"
-            label="마감 검수"
-            value={`${finishCases}`}
-            unit="건"
-            note="창호·내부·외부·가설 / 조적 별도"
-          />
-          <KpiCard
-            tone="red"
-            label="확인 필요"
-            value={`${selectedProject.needsAttentionCount}`}
-            unit="건"
-            note="검수 엔진 연결 전에는 미실행"
-          />
-        </div>
-
-        <section
-          className="glass-panel readiness-board"
-          aria-labelledby="readiness-board-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <h2 id="readiness-board-title">검수 모듈 준비상태</h2>
-              <p>
-                실제 API·근거 계보가 없는 결과는 완료나 정상으로 표시하지
-                않습니다.
-              </p>
-            </div>
-            <span className="status-badge status-pending">엔진 연결 전</span>
-          </div>
-          <div className="readiness-matrix">
-            <ReadinessItem
-              icon={FileScan}
-              title="산출식 이상치"
-              description="과도한 길이·면적·반복계수와 건물 규모 대비 이상식을 검토합니다."
-            />
-            <ReadinessItem
-              icon={Layers3}
-              title="중복 아이템"
-              description="품명·규격·부위·단위·범위 근거를 비교하고 PM 통합 후보를 제시합니다."
-            />
-            <ReadinessItem
-              icon={Ruler}
-              title="4원천 면적분석"
-              description="설계개요·면적근거표·CAD·최종마감 산출서를 층별로 대조합니다."
-            />
-            <ReadinessItem
-              icon={Download}
-              title="Excel 분석표"
-              description="확정 결과와 미검증 범위·규칙 버전·원본 계보를 함께 내보냅니다."
-            />
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  if (view === 'formula') return <FormulaWorkspace project={selectedProject} />;
-  if (view === 'duplicates')
+  if (view === 'formula-ai')
+    return <FormulaWorkspace project={selectedProject} />;
+  if (view === 'duplicate-ai')
     return <DuplicateWorkspace project={selectedProject} />;
-  if (view === 'area') return <AreaWorkspace project={selectedProject} />;
-  if (view === 'discipline')
-    return <DisciplineWorkspace project={selectedProject} />;
-  return <ReportsWorkspace project={selectedProject} />;
+  if (view === 'analysis')
+    return <AnalysisOverviewWorkspace project={selectedProject} />;
+
+  return (
+    <TradeAnalysisWorkspace
+      project={selectedProject}
+      metadata={tradeMetadata[view]}
+    />
+  );
 }
 
 function ModuleHeading({
@@ -201,61 +304,16 @@ function ModuleHeading({
   );
 }
 
-function KpiCard({
-  tone,
-  label,
-  value,
-  unit,
-  note,
-}: {
-  tone: 'cyan' | 'emerald' | 'amber' | 'red';
-  label: string;
-  value: string;
-  unit: string;
-  note: string;
-}) {
-  return (
-    <article className={`kpi-card tone-${tone}`}>
-      <span className="kpi-label">{label}</span>
-      <p className="kpi-value-row">
-        <strong className="kpi-value">{value}</strong>
-        <span>{unit}</span>
-      </p>
-      <small>{note}</small>
-    </article>
-  );
-}
-
-function ReadinessItem({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-}) {
-  return (
-    <article className="readiness-item">
-      <Icon aria-hidden="true" />
-      <div>
-        <h3>{title}</h3>
-        <p>{description}</p>
-      </div>
-      <span>미실행</span>
-    </article>
-  );
-}
-
 function FormulaWorkspace({ project }: { project: ProjectSummary }) {
   const [teamFilter, setTeamFilter] = useState<'all' | 'RC' | 'FIN'>('all');
   const showExample = teamFilter !== 'RC';
+
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="산출식 이상치 검수"
+        title="산출식 AI 검수"
         description={`${project.name}의 원 산출식을 부위·단위·건물 규모와 교차검토하고 PM 확인 목록으로 만듭니다.`}
-        status="결정론 우선 · AI는 설명만"
+        status="Level A 결정론 우선 · AI는 설명만"
       />
       <div className="module-toolbar">
         <div className="segmented-control" aria-label="팀 구분">
@@ -275,7 +333,7 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
             </button>
           ))}
         </div>
-        <span className="status-badge status-pending">자료 매핑 필요</span>
+        <span className="status-badge status-pending">입력 매핑 필요</span>
       </div>
       <section className="glass-panel" aria-labelledby="formula-list-title">
         <div className="panel-heading">
@@ -301,8 +359,8 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
               <tr>
                 <td colSpan={6} className="empty-table-cell">
                   {showExample
-                    ? '실제 산출서와 집계표 매핑 후 PM 확인 목록이 표시됩니다.'
-                    : '구조 검수 엔진이 아직 연결되지 않았습니다.'}
+                    ? '산출서와 집계표의 입력 매핑이 완료되면 PM 확인 목록이 표시됩니다.'
+                    : '구조 산출식 검수 엔진이 아직 연결되지 않았습니다.'}
                 </td>
               </tr>
             </tbody>
@@ -327,9 +385,9 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="중복 아이템 통합 검토"
+        title="중복 아이템 AI 검수"
         description={`${project.name}에서 여러 산출자가 만든 품목을 비교하되 원본은 자동 병합하지 않습니다.`}
-        status="부위 하드룰 우선"
+        status="부위 하드룰 우선 · PM 확정"
       />
       <section className="glass-panel" aria-labelledby="duplicate-title">
         <div className="panel-heading">
@@ -340,7 +398,7 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
             </p>
           </div>
           <span className="status-badge status-pending">
-            실제 후보 N/A · 미실행
+            N/A · 입력 매핑 필요
           </span>
         </div>
         <div className="merge-matrix-grid">
@@ -396,18 +454,19 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
   );
 }
 
-function AreaWorkspace({ project }: { project: ProjectSummary }) {
+function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
   const sources = [
     ['설계개요', 'PDF·이미지', '연면적·건축면적·층 정보'],
     ['면적산정근거표', 'PDF·XLSX', '층별 기준면적과 산정 근거'],
-    ['CONCOST CAD 면적도면', 'DXF', 'ezdxf 연결 전 · 폐합면적·층 라벨 대기'],
+    ['CONCOST CAD 면적도면', 'DXF', '폐합면적·층 라벨 입력'],
     ['최종마감재 산출서', 'XLSX', '부위별 최종마감 권위 수량'],
   ] as const;
+
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="층별 면적 정합성 분석"
-        description={`${project.name}의 4대 원천을 같은 동·층 키로 맞춘 뒤 누락·과다 면적을 비율로 표시합니다.`}
+        title="수량산출 분석표"
+        description={`${project.name}의 4대 원천을 같은 동·층 키로 맞춘 뒤 내부·외부 누락과 과다 면적을 비율로 표시합니다.`}
         status="4원천 모두 확인 후 확정"
       />
       <div className="area-source-grid">
@@ -427,10 +486,13 @@ function AreaWorkspace({ project }: { project: ProjectSummary }) {
       <section className="glass-panel" aria-labelledby="area-table-title">
         <div className="panel-heading">
           <div>
-            <h2 id="area-table-title">층별 대조표</h2>
-            <p>미확정 원천은 0이 아니라 N/A로 보존합니다.</p>
+            <h2 id="area-table-title">내부·외부 층별 대조표</h2>
+            <p>
+              미확정 원천은 0이 아니라 N/A로 보존하며 조적은 계산에서
+              제외합니다.
+            </p>
           </div>
-          <span className="status-badge status-pending">원천 미연결</span>
+          <span className="status-badge status-pending">N/A · 원천 미등록</span>
         </div>
         <section className="data-table-shell" aria-label="층별 면적 대조표">
           <table className="analytics-table area-table">
@@ -448,7 +510,91 @@ function AreaWorkspace({ project }: { project: ProjectSummary }) {
             <tbody>
               <tr>
                 <td colSpan={7} className="empty-table-cell">
-                  4대 원천을 등록하면 층별 분석표가 생성됩니다.
+                  4대 원천을 등록하면 내부·외부 층별 분석표가 생성됩니다.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <aside className="prototype-note">
+          <ShieldCheck aria-hidden="true" />
+          <span>
+            조적은 동일 아이템·면적·경험통계 계산에서 제외하고 제외 건수와
+            수량만 감사 기록으로 남깁니다.
+          </span>
+        </aside>
+      </section>
+      <section
+        className="glass-panel report-builder"
+        aria-labelledby="excel-title"
+      >
+        <div className="panel-heading">
+          <div>
+            <h2 id="excel-title">거래처 제출용 Excel 분석표</h2>
+            <p>
+              검토 완료값, 미검증 범위, 규칙 버전과 원본 계보를 함께 냅니다.
+            </p>
+          </div>
+          <span className="status-badge status-pending">출력 조건 미충족</span>
+        </div>
+        <button className="primary-action" type="button" disabled>
+          <Download aria-hidden="true" /> Excel 다운로드
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function TradeAnalysisWorkspace({
+  project,
+  metadata,
+}: {
+  project: ProjectSummary;
+  metadata: TradeMetadata;
+}) {
+  if (metadata.trade === '조적') {
+    return <MasonryAuditWorkspace project={project} />;
+  }
+
+  return (
+    <div className="analytics-workspace">
+      <ModuleHeading
+        title={`${metadata.team} · ${metadata.trade} 공종별 분석표`}
+        description={`${project.name}의 ${metadata.trade} 산출서와 집계표를 ${metadata.code} 계보 안에서 비교합니다.`}
+        status="N/A · 입력 매핑 필요"
+      />
+      <section className="glass-panel" aria-labelledby="trade-analysis-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="trade-analysis-title">공종별 수량 대조</h2>
+            <p>
+              품명·규격·단위·부위·동·층·산출근거가 연결된 행만 분석에
+              포함합니다.
+            </p>
+          </div>
+          <span className="result-count">N/A · 미실행</span>
+        </div>
+        <section
+          className="data-table-shell"
+          aria-label={`${metadata.trade} 공종별 분석표`}
+        >
+          <table className="analytics-table">
+            <thead>
+              <tr>
+                <th scope="col">품명·규격</th>
+                <th scope="col">부위</th>
+                <th scope="col">단위</th>
+                <th scope="col">산출 수량</th>
+                <th scope="col">집계 수량</th>
+                <th scope="col">차이</th>
+                <th scope="col">판정</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={7} className="empty-table-cell">
+                  {metadata.trade} 공종의 산출서와 집계표 입력 매핑이 완료되지
+                  않았습니다.
                 </td>
               </tr>
             </tbody>
@@ -459,110 +605,223 @@ function AreaWorkspace({ project }: { project: ProjectSummary }) {
   );
 }
 
-function DisciplineWorkspace({ project }: { project: ProjectSummary }) {
+function MasonryAuditWorkspace({ project }: { project: ProjectSummary }) {
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="구조·마감 공종별 검수"
-        description={`${project.name}의 검수 결과를 팀과 공종 기준으로 분리해 PM이 책임 범위별로 확인합니다.`}
-        status="공종 경계 고정"
+        title="마감 · 조적 수량 분석표"
+        description={`${project.name}의 조적 행을 검수 계산에 넣지 않고 제외 건수·수량·원본 계보만 감사합니다.`}
+        status="SYSTEM_HARD_RULE · 계산 제외"
       />
-      <div className="discipline-grid">
-        <TradePanel title="구조" code="RC" trades={structureTrades} />
-        <TradePanel title="마감" code="FIN" trades={finishTrades} masonry />
-      </div>
+      <section className="glass-panel" aria-labelledby="masonry-audit-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="masonry-audit-title">조적 제외 감사표</h2>
+            <p>
+              AI 검수·동일 아이템·면적분석·경험통계에는 포함하지 않으며
+              excluded_reason만 보존합니다.
+            </p>
+          </div>
+          <span className="result-count">N/A · 제외 계보 미등록</span>
+        </div>
+        <section className="data-table-shell" aria-label="조적 제외 감사표">
+          <table className="analytics-table">
+            <thead>
+              <tr>
+                <th scope="col">원본 파일</th>
+                <th scope="col">시트·행</th>
+                <th scope="col">품명·규격</th>
+                <th scope="col">단위</th>
+                <th scope="col">제외 수량</th>
+                <th scope="col">제외 사유</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={6} className="empty-table-cell">
+                  조적 산출서와 집계표의 제외 계보가 아직 등록되지 않았습니다.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
     </div>
   );
 }
 
-function TradePanel({
-  title,
-  code,
-  trades,
-  masonry = false,
-}: {
-  title: string;
-  code: string;
-  trades: readonly string[];
-  masonry?: boolean;
-}) {
-  return (
-    <section
-      className="glass-panel trade-panel"
-      aria-labelledby={`trade-${code}`}
-    >
-      <div className="panel-heading">
-        <div>
-          <h2 id={`trade-${code}`}>{title}팀</h2>
-          <p>{code} 계보와 결과를 독립 관리합니다.</p>
-        </div>
-        <span className="status-badge status-pending">미실행</span>
-      </div>
-      <div className="trade-chip-list">
-        {trades.map((trade) => (
-          <button key={trade} type="button" disabled>
-            {trade}
-            {masonry && trade === '조적' && <small>계산 제외·감사만</small>}
-          </button>
-        ))}
-      </div>
-      <p className="panel-footnote">
-        산출서와 집계표 semantic 매핑 완료 후 공종별 결과가 활성화됩니다.
-      </p>
-    </section>
+function SettingsWorkspace() {
+  const [aiStatus, setAiStatus] = useState<GeminiConfigurationStatus | null>(
+    null,
   );
-}
+  const [aiMessage, setAiMessage] = useState('Gemini 서버 설정을 확인하는 중…');
+  const [testing, setTesting] = useState(false);
 
-function ReportsWorkspace({ project }: { project: ProjectSummary }) {
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch('/api/settings/ai', {
+          cache: 'no-store',
+        });
+        const body = (await response.json()) as
+          | ApiSuccessEnvelope<GeminiConfigurationStatus>
+          | ApiErrorEnvelope;
+        if (!response.ok || 'error' in body) {
+          throw new Error(
+            'error' in body
+              ? body.error.message
+              : 'Gemini 설정을 확인하지 못했습니다.',
+          );
+        }
+        if (cancelled) return;
+        setAiStatus(body.data);
+        setAiMessage(
+          body.data.status === 'ready'
+            ? '서버에 비밀키와 허용 모델이 등록되어 있습니다.'
+            : body.data.status === 'not_configured'
+              ? 'Sites 서버 환경변수에 API 키를 등록해야 합니다.'
+              : '허용 모델 또는 서버 환경변수 구성을 확인하세요.',
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setAiMessage(
+          error instanceof Error
+            ? error.message
+            : 'Gemini 설정을 확인하지 못했습니다.',
+        );
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function testConnection() {
+    setTesting(true);
+    setAiMessage('Gemini 연결을 확인하는 중…');
+    try {
+      const response = await fetch('/api/settings/ai/connection-test', {
+        method: 'POST',
+      });
+      const body = (await response.json()) as
+        | ApiSuccessEnvelope<{ status: 'connected'; model: string }>
+        | ApiErrorEnvelope;
+      if (!response.ok || 'error' in body) {
+        throw new Error(
+          'error' in body ? body.error.message : 'Gemini 연결에 실패했습니다.',
+        );
+      }
+      setAiMessage(`${body.data.model} 연결 확인 완료`);
+    } catch (error) {
+      setAiMessage(
+        error instanceof Error ? error.message : 'Gemini 연결에 실패했습니다.',
+      );
+    } finally {
+      setTesting(false);
+    }
+  }
+
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="Excel 분석표·검수 보고서"
-        description={`${project.name}의 확정 결과와 근거 계보를 감사 가능한 Excel로 출력합니다.`}
-        status="결과 확정 후 출력"
+        title="설정"
+        description="승인 계정, Gemini AI, ERP 프로젝트 연동과 검수 규칙 프로필 상태를 관리합니다."
+        status="서버 보안 설정"
       />
       <section
-        className="glass-panel report-builder"
-        aria-labelledby="report-title"
+        className="glass-panel ai-settings-panel"
+        aria-labelledby="ai-settings-title"
       >
         <div className="panel-heading">
           <div>
-            <h2 id="report-title">보고서 구성</h2>
+            <span className="panel-kicker">AI PROVIDER</span>
+            <h2 id="ai-settings-title">Gemini API 연동</h2>
             <p>
-              검토되지 않은 결과와 미확정 원천은 보고서에서 명시적으로
-              구분합니다.
+              API 키는 브라우저·D1·로그에 저장하지 않고 Sites 서버
+              환경변수에서만 읽습니다.
             </p>
           </div>
-          <span className="status-badge status-pending">출력 엔진 준비 중</span>
+          <span
+            className={`status-badge ${aiStatus?.status === 'ready' ? 'status-ready' : 'status-pending'}`}
+          >
+            {aiStatus?.status === 'ready'
+              ? '설정 완료'
+              : aiStatus?.status === 'invalid_configuration'
+                ? '설정 오류'
+                : '미연결'}
+          </span>
         </div>
-        <div className="report-layout">
-          <ol className="report-sheet-list">
-            {[
-              '종합 요약',
-              '산출식 이상치',
-              '중복 아이템',
-              '층별 면적분석',
-              '구조·마감 공종별',
-            ].map((sheet) => (
-              <li key={sheet}>
-                <LockKeyhole aria-hidden="true" />
-                <span>{sheet}</span>
-                <small>결과 확정 후 생성</small>
-              </li>
-            ))}
-          </ol>
-          <div className="report-action-panel">
-            <Download aria-hidden="true" />
-            <strong>Excel 분석표</strong>
-            <p>
-              선택 프로젝트의 검수 실행·승인 결과가 아직 없어 출력을 잠급니다.
-            </p>
-            <button className="primary-action" type="button" disabled>
-              Excel 다운로드
+        <div className="ai-settings-grid">
+          <dl>
+            <div>
+              <dt>Provider</dt>
+              <dd>Google Gemini</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{aiStatus?.model ?? 'N/A · 미등록'}</dd>
+            </div>
+            <div>
+              <dt>Secret</dt>
+              <dd>서버 전용 · 화면 비노출</dd>
+            </div>
+            <div>
+              <dt>Review</dt>
+              <dd>데이터 매핑 완료 전 미실행</dd>
+            </div>
+          </dl>
+          <div className="ai-settings-actions">
+            <output aria-live="polite">{aiMessage}</output>
+            <button
+              className="primary-action"
+              type="button"
+              disabled={aiStatus?.status !== 'ready' || testing}
+              onClick={() => void testConnection()}
+            >
+              {testing ? '연결 확인 중…' : 'Gemini 연결 시험'}
             </button>
           </div>
         </div>
       </section>
+      <section className="glass-panel" aria-labelledby="settings-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="settings-title">연동 및 정책 상태</h2>
+            <p>
+              현재 화면은 상태만 공개합니다. 서버 정책과 감사 기록이 없는 설정을
+              활성 상태로 표시하지 않습니다.
+            </p>
+          </div>
+          <span className="status-badge status-pending">N/A · 미구현</span>
+        </div>
+        <div className="readiness-matrix">
+          <SettingsStatus title="승인 계정 정책" state="서버 적용" />
+          <SettingsStatus title="ERP 프로젝트 연동" />
+          <SettingsStatus title="검수 규칙 프로필" />
+          <SettingsStatus title="Excel 출력 정책" />
+        </div>
+      </section>
     </div>
+  );
+}
+
+function SettingsStatus({
+  title,
+  state = '미연결',
+}: {
+  title: string;
+  state?: string;
+}) {
+  return (
+    <article className="readiness-item">
+      <Settings aria-hidden="true" />
+      <div>
+        <h3>{title}</h3>
+        <p>서버 계약과 운영 권한 연결 후 활성화됩니다.</p>
+      </div>
+      <span>{state}</span>
+    </article>
   );
 }

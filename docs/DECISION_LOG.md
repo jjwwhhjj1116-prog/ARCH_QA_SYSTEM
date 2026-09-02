@@ -17,6 +17,9 @@ Use this file as the human-readable index of accepted architecture and product d
 | D-011 | 2026-09-01 | Replace the light desktop-console shell with a responsive high-tech dark glass web workspace while retaining Korean text navigation and explicit non-engine states | Accepted   | `DESIGN.md`, browser and accessibility evidence         | Main / UI reviewer  |
 | D-012 | 2026-09-01 | Make ERP-matching project name the user-facing identity; generate the opaque internal project code server-side and never require manual code entry                 | Accepted   | `lib/projects/service.ts`, E2E project flow             | Main                |
 | D-013 | 2026-09-01 | Treat Sites identity plus the private access list as the current gate, not as verified company-employment SSO; show local auth bypass prominently                  | Accepted   | `app/page.tsx`, `app/review-studio.tsx`                 | Platform / Main     |
+| D-014 | 2026-09-02 | Add an application-level exact-email allowlist after Sites identity, fail closed in production, and keep local demo unavailable in production                      | Accepted   | `lib/auth/account-access.ts`, `app/page.tsx`            | Platform / Main     |
+| D-015 | 2026-09-02 | Separate project registration from project data upload, use the official CON COST logo, and encode the five-stage workflow with distinct non-semantic stage colors | Accepted   | `app/review-studio.tsx`, `DESIGN.md`                    | Main / UI reviewer  |
+| D-016 | 2026-09-02 | Keep Gemini credentials server-only; expose only configuration readiness and an authenticated connection test until review input mapping is implemented            | Accepted   | `lib/server/ai/gemini-config.ts`, settings API          | AI / Platform       |
 
 ## Status values
 

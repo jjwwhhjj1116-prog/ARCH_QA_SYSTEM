@@ -63,7 +63,7 @@ function failure(error: unknown, requestId: string): Response {
   let message = '요청을 처리하지 못했습니다. 다시 시도해 주세요.';
   let details: unknown;
   if (error instanceof AuthenticationError) {
-    status = 401;
+    status = error.status;
     code = error.code;
     message = error.message;
   } else if (error instanceof ProjectConflictError) {

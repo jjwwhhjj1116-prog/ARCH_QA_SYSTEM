@@ -2,19 +2,12 @@
 
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
-  Database,
   Download,
-  FileCheck2,
-  FileSpreadsheet,
   Link2Off,
   Menu,
-  Plus,
   RefreshCcw,
-  Search,
-  Upload,
   UserRound,
   X,
 } from 'lucide-react';
@@ -34,9 +27,12 @@ import type {
 } from '@/lib/domain/contracts';
 import { canonicalSourceFilename } from '@/lib/imports/source-filename';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
+import { ProjectDataWorkspace } from './project-data-workspace';
+import { ProjectRegistrationWorkspace } from './project-registration-workspace';
 import {
   ModuleWorkspace,
   studioNavigation,
+  type StudioNavigationNode,
   type StudioView,
 } from './review-modules';
 
@@ -44,10 +40,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 type MessageTone = 'neutral' | 'success' | 'error';
 
 type ReviewStudioProps = {
-  currentUser: {
-    displayName: string;
-    email: string;
-  };
+  currentUser: { displayName: string; email: string };
   isLocalDemo?: boolean;
 };
 
@@ -62,7 +55,10 @@ export function ReviewStudio({
   const [showCreate, setShowCreate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
-  const [activeView, setActiveView] = useState<StudioView>('projects');
+  const [activeView, setActiveView] = useState<StudioView>('project-register');
+  const [expandedGroups, setExpandedGroups] = useState(
+    () => new Set(['analysis-group', 'structure-group', 'finish-group']),
+  );
   const [query, setQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
@@ -79,21 +75,32 @@ export function ReviewStudio({
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const primarySidebarRef = useRef<HTMLElement>(null);
+  const mainHeadingRef = useRef<HTMLElement>(null);
   const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
 
+  const navigate = useCallback(
+    (view: StudioView) => {
+      setActiveView(view);
+      if (mobileNav) {
+        setMobileNav(false);
+        window.setTimeout(() => mainHeadingRef.current?.focus(), 0);
+      }
+    },
+    [mobileNav],
+  );
+
   const selectProject = useCallback((projectId: string) => {
-    if (selectedProjectIdRef.current === projectId) {
-      setActiveView('projects');
-      return;
+    if (selectedProjectIdRef.current !== projectId) {
+      selectedProjectIdRef.current = projectId;
+      setSelectedProjectId(projectId);
+      setReviewCases([]);
+      setCaseState('loading');
+      setUploadCaseId(null);
+      setSourceFiles([]);
+      setUploadProgress('');
+      uploadKeyRef.current = null;
     }
-    selectedProjectIdRef.current = projectId;
-    setSelectedProjectId(projectId);
-    setReviewCases([]);
-    setCaseState('loading');
-    setUploadCaseId(null);
-    setSourceFiles([]);
-    setUploadProgress('');
-    uploadKeyRef.current = null;
+    setActiveView('project-data');
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -102,12 +109,13 @@ export function ReviewStudio({
       const body = (await response.json()) as
         | ApiSuccessEnvelope<ProjectSummary[]>
         | ApiErrorEnvelope;
-      if (!response.ok || 'error' in body)
+      if (!response.ok || 'error' in body) {
         throw new Error(
           'error' in body
             ? body.error.message
             : '프로젝트를 불러오지 못했습니다.',
         );
+      }
       setProjects(body.data);
       setLoadState('ready');
       setMessageTone('neutral');
@@ -148,9 +156,9 @@ export function ReviewStudio({
       if (event.key !== 'Tab') return;
       const focusable =
         primarySidebarRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
         );
-      if (!focusable || focusable.length === 0) return;
+      if (!focusable?.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) {
@@ -187,8 +195,6 @@ export function ReviewStudio({
     const projectId = selectedProjectId;
     const controller = new AbortController();
     const loadCases = async () => {
-      await Promise.resolve();
-      if (controller.signal.aborted) return;
       setCaseState('loading');
       try {
         const response = await fetch(`/api/projects/${projectId}/cases`, {
@@ -209,8 +215,11 @@ export function ReviewStudio({
         setReviewCases(body.data);
         setCaseState('ready');
       } catch (error) {
-        if (controller.signal.aborted) return;
-        if (selectedProjectIdRef.current !== projectId) return;
+        if (
+          controller.signal.aborted ||
+          selectedProjectIdRef.current !== projectId
+        )
+          return;
         setReviewCases([]);
         setCaseState('error');
         setMessageTone('error');
@@ -222,21 +231,19 @@ export function ReviewStudio({
       }
     };
     void loadCases();
-    return () => {
-      controller.abort();
-    };
+    return () => controller.abort();
   }, [caseReloadToken, selectedProjectId]);
 
   async function createReviewCase(discipline: 'FIN' | 'RC') {
     if (!selectedProject) return;
-    const targetProject = selectedProject;
+    const target = selectedProject;
     setCaseSubmitting(true);
     try {
-      const response = await fetch(`/api/projects/${targetProject.id}/cases`, {
+      const response = await fetch(`/api/projects/${target.id}/cases`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name: `${targetProject.name} ${disciplineLabel(discipline)} 검수 ${reviewCases.length + 1}`,
+          name: `${target.name} ${discipline === 'RC' ? '구조' : '마감'} 검수 ${reviewCases.length + 1}`,
           discipline,
         }),
       });
@@ -250,29 +257,25 @@ export function ReviewStudio({
             : '검수 케이스를 만들지 못했습니다.',
         );
       }
-      if (selectedProjectIdRef.current === targetProject.id) {
+      if (selectedProjectIdRef.current === target.id) {
         setReviewCases((current) => [body.data, ...current]);
+        setMessageTone('success');
+        setMessage(`${body.data.name} 케이스를 만들었습니다.`);
       }
       setProjects((current) =>
         current.map((project) =>
-          project.id === targetProject.id
+          project.id === target.id
             ? { ...project, openCaseCount: project.openCaseCount + 1 }
             : project,
         ),
       );
-      if (selectedProjectIdRef.current === targetProject.id) {
-        setMessageTone('success');
-        setMessage(`${body.data.name} 케이스를 만들었습니다.`);
-      }
     } catch (error) {
-      if (selectedProjectIdRef.current === targetProject.id) {
-        setMessageTone('error');
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : '검수 케이스를 만들지 못했습니다.',
-        );
-      }
+      setMessageTone('error');
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : '검수 케이스를 만들지 못했습니다.',
+      );
     } finally {
       setCaseSubmitting(false);
     }
@@ -352,7 +355,7 @@ export function ReviewStudio({
             : '자료 등록 공간을 만들지 못했습니다.',
         );
       }
-      const filesByKey = new Map<string, File>(
+      const filesByKey = new Map(
         canonicalFiles.map(
           ({ file, name }) => [`${name}\u0000${file.size}`, file] as const,
         ),
@@ -365,9 +368,8 @@ export function ReviewStudio({
         const file = filesByKey.get(
           `${intent.filename}\u0000${intent.sizeBytes}`,
         );
-        if (!file) {
+        if (!file)
           throw new Error(`${intent.filename} 원본 파일을 다시 선택해 주세요.`);
-        }
         setUploadProgress(
           `${intent.filename} 검사·저장 중 (${completed + 1}/${sourceFiles.length})`,
         );
@@ -391,7 +393,7 @@ export function ReviewStudio({
       setUploadProgress(`${completed}개 파일의 원본·해시·계보를 저장했습니다.`);
       setMessageTone('success');
       setMessage(
-        `${completed}개 산출서와 집계표를 저장했습니다. 프로젝트 식별은 아직 미확정입니다.`,
+        `${completed}개 산출서와 집계표를 저장했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
       );
       uploadKeyRef.current = null;
       window.setTimeout(() => {
@@ -432,17 +434,20 @@ export function ReviewStudio({
       const body = (await response.json()) as
         | ApiSuccessEnvelope<ProjectSummary>
         | ApiErrorEnvelope;
-      if (!response.ok || 'error' in body)
+      if (!response.ok || 'error' in body) {
         throw new Error(
           'error' in body
             ? body.error.message
             : '프로젝트를 만들지 못했습니다.',
         );
+      }
       setProjects((current) => [body.data, ...current]);
-      selectProject(body.data.id);
-      setMessage(`${body.data.name} 프로젝트를 만들었습니다.`);
+      setMessage(
+        `${body.data.name} 프로젝트를 만들었습니다. 다음 단계에서 자료를 등록하세요.`,
+      );
       setMessageTone('success');
       setShowCreate(false);
+      selectProject(body.data.id);
     } catch (error) {
       setMessageTone('error');
       setMessage(
@@ -455,8 +460,19 @@ export function ReviewStudio({
     }
   }
 
+  function toggleGroup(id: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const stage = findNavigationStage(studioNavigation, activeView);
+
   return (
-    <div className="studio-shell">
+    <div className="studio-shell" data-current-stage={stage?.tone ?? 'neutral'}>
       <a className="skip-link" href="#main-content">
         본문으로 건너뛰기
       </a>
@@ -467,13 +483,11 @@ export function ReviewStudio({
         aria-label="주요 메뉴"
       >
         <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-          </span>
-          <div>
-            <strong>CON COST</strong>
-            <span>Review Studio</span>
-          </div>
+          <span aria-hidden="true" className="brand-logo brand-logo-stacked" />
+          <span
+            aria-hidden="true"
+            className="brand-logo brand-logo-horizontal"
+          />
           <button
             ref={closeMenuButtonRef}
             className="icon-button mobile-only"
@@ -484,31 +498,22 @@ export function ReviewStudio({
             <X aria-hidden="true" />
           </button>
         </div>
-        <p className="brand-description">QTO QA &amp; Analytics</p>
-        <nav className="primary-nav">
-          {studioNavigation.map((item) => {
-            const isActive = activeView === item.id;
-            return (
-              <button
-                key={item.id}
-                className={isActive ? 'nav-item is-active' : 'nav-item'}
-                type="button"
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => {
-                  setActiveView(item.id);
-                  if (mobileNav) closeMobileNavigation();
-                }}
-              >
-                <item.icon aria-hidden="true" />
-                <span>{item.label}</span>
-                {item.id === 'formula' &&
-                  selectedProject &&
-                  selectedProject.needsAttentionCount > 0 && (
-                    <small>{selectedProject.needsAttentionCount}</small>
-                  )}
-              </button>
-            );
-          })}
+        <div className="brand-description">
+          <strong>CONCOST 기술본부 QC 스튜디오</strong>
+          <span>QUANTITY CONTROL WORKSPACE</span>
+        </div>
+        <nav className="primary-nav" aria-label="QC 업무 단계">
+          {studioNavigation.map((node) => (
+            <NavigationNode
+              key={node.id}
+              node={node}
+              activeView={activeView}
+              expandedGroups={expandedGroups}
+              onNavigate={navigate}
+              onToggleGroup={toggleGroup}
+              attentionCount={selectedProject?.needsAttentionCount ?? 0}
+            />
+          ))}
         </nav>
         <div className="sidebar-foot">
           <div className="employee-profile">
@@ -535,7 +540,11 @@ export function ReviewStudio({
         />
       )}
 
-      <div className="workspace">
+      <div
+        className="workspace"
+        inert={mobileNav ? true : undefined}
+        aria-hidden={mobileNav ? true : undefined}
+      >
         {isLocalDemo && (
           <div className="demo-mode-banner" role="alert">
             <AlertTriangle aria-hidden="true" />
@@ -556,12 +565,16 @@ export function ReviewStudio({
             <Menu aria-hidden="true" />
           </button>
           <div className="topbar-title">
-            <strong>QTO QA & Analytics Studio</strong>
-            <span>물량산출 완료 후 PM 검수 워크스페이스</span>
+            <strong>CONCOST 기술본부 QC 스튜디오</strong>
+            <span>물량산출 완료 후 PM·팀별 검수 워크스페이스</span>
+          </div>
+          <div className="stage-indicator" aria-label="현재 업무 단계">
+            <span>{stage?.stage ? `${stage.stage} / 5` : '설정'}</span>
+            <strong>{stage?.label ?? '프로젝트 등록'}</strong>
           </div>
           <div className="project-switcher">
             <span>
-              <Link2Off aria-hidden="true" /> ERP 미연동
+              <Link2Off aria-hidden="true" /> ERP 연동 대기
             </span>
             <label>
               <span className="sr-only">현재 프로젝트</span>
@@ -573,7 +586,7 @@ export function ReviewStudio({
                     selectedProjectIdRef.current = null;
                     setSelectedProjectId(null);
                     setReviewCases([]);
-                    setActiveView('projects');
+                    setActiveView('project-register');
                   }
                 }}
               >
@@ -589,7 +602,7 @@ export function ReviewStudio({
           </div>
           <div className="topbar-actions">
             <span className="engine-state-note" id="engine-action-status">
-              <AlertTriangle aria-hidden="true" /> 검수 엔진 미연결
+              <AlertTriangle aria-hidden="true" /> AI 검수 미실행
             </span>
             <button
               type="button"
@@ -608,450 +621,59 @@ export function ReviewStudio({
           </div>
         </header>
 
-        <main id="main-content" className="main-layout">
-          {activeView === 'projects' ? (
-            <section className="project-workspace" aria-labelledby="page-title">
-              <div className="page-heading">
-                <div>
-                  <p>검수 업무 시작점</p>
-                  <h1 id="page-title">검수 프로젝트</h1>
-                  <span>
-                    프로젝트를 선택하거나 새 검수를 시작하세요. 자료는 프로젝트
-                    경계 밖으로 섞이지 않습니다.
-                  </span>
-                </div>
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={() => setShowCreate((value) => !value)}
-                >
-                  <Plus aria-hidden="true" /> 새 프로젝트
-                </button>
-              </div>
-
-              <output
-                className={`system-message ${messageTone}`}
-                aria-live="polite"
-              >
-                {messageTone === 'error' ? (
-                  <AlertTriangle aria-hidden="true" />
-                ) : (
-                  <Database aria-hidden="true" />
-                )}
-                <span>{message}</span>
-                {loadState === 'error' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLoadState('loading');
-                      setMessageTone('neutral');
-                      void loadProjects();
-                    }}
-                  >
-                    다시 시도
-                  </button>
-                )}
-              </output>
-
-              {showCreate && (
-                <form
-                  className="create-project-panel"
-                  onSubmit={(event) => void createProject(event)}
-                >
-                  <div className="form-heading">
-                    <div>
-                      <h2>새 프로젝트 등록</h2>
-                      <p>
-                        ERP 그룹웨어와 동일한 프로젝트명으로 등록하세요. 연동
-                        전에는 수동으로 관리합니다.
-                      </p>
-                    </div>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="등록 화면 닫기"
-                      onClick={() => setShowCreate(false)}
-                    >
-                      <X aria-hidden="true" />
-                    </button>
-                  </div>
-                  <div className="form-grid">
-                    <label>
-                      프로젝트명
-                      <input
-                        name="name"
-                        required
-                        minLength={2}
-                        maxLength={120}
-                        placeholder="예: 덕천3구역 재건축"
-                      />
-                    </label>
-                    <label>
-                      발주처·고객사 <span>(선택)</span>
-                      <input
-                        name="clientName"
-                        maxLength={120}
-                        placeholder="예: 한화건설"
-                      />
-                    </label>
-                  </div>
-                  <div className="form-actions">
-                    <button
-                      className="secondary-action"
-                      type="button"
-                      onClick={() => setShowCreate(false)}
-                    >
-                      취소
-                    </button>
-                    <button
-                      className="primary-action"
-                      type="submit"
-                      disabled={submitting}
-                    >
-                      {submitting ? '등록 중…' : '프로젝트 만들기'}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              <div className="project-toolbar">
-                <label className="search-field">
-                  <Search aria-hidden="true" />
-                  <span className="sr-only">프로젝트 검색</span>
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="프로젝트명·발주처 검색"
-                  />
-                </label>
-                <div className="project-count">
-                  <strong>{visibleProjects.length}</strong>개 표시
-                </div>
-              </div>
-
-              {loadState === 'ready' && projects.length === 0 ? (
-                <div className="empty-projects">
-                  <div className="empty-graphic" aria-hidden="true">
-                    <FileSpreadsheet />
-                    <span />
-                    <FileCheck2 />
-                  </div>
-                  <div>
-                    <h2>첫 검수 프로젝트를 등록하세요</h2>
-                    <p>
-                      프로젝트를 만든 다음 산출서와 집계표를 함께 등록하면
-                      양식·프로젝트·중복 여부부터 확인합니다.
-                    </p>
-                  </div>
-                  <button
-                    className="primary-action"
-                    type="button"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus aria-hidden="true" /> 프로젝트 등록
-                  </button>
-                  <ul>
-                    <li>
-                      <Check aria-hidden="true" /> 원본 파일 무수정
-                    </li>
-                    <li>
-                      <Check aria-hidden="true" /> 프로젝트 혼합 차단
-                    </li>
-                    <li>
-                      <Check aria-hidden="true" /> 검수 계보 기록
-                    </li>
-                  </ul>
-                </div>
-              ) : (
-                <div className="project-table-wrap">
-                  <table className="project-table">
-                    <caption className="sr-only">
-                      접근 가능한 검수 프로젝트 목록
-                    </caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">프로젝트</th>
-                        <th scope="col">역할</th>
-                        <th scope="col">진행 검수</th>
-                        <th scope="col">확인 필요</th>
-                        <th scope="col">작업</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleProjects.map((project) => (
-                        <tr key={project.id}>
-                          <td>
-                            <strong>{project.name}</strong>
-                            <span>{project.clientName || 'ERP 연동 대기'}</span>
-                          </td>
-                          <td>
-                            <span className="role-badge">
-                              {roleLabel(project.role)}
-                            </span>
-                          </td>
-                          <td>{project.openCaseCount}건</td>
-                          <td
-                            className={
-                              project.needsAttentionCount > 0 ? 'attention' : ''
-                            }
-                          >
-                            {project.needsAttentionCount}건
-                          </td>
-                          <td>
-                            <button
-                              className="row-action"
-                              type="button"
-                              onClick={() => selectProject(project.id)}
-                            >
-                              검수 열기 <ChevronRight aria-hidden="true" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {visibleProjects.length === 0 && (
-                    <p className="no-search-result">
-                      검색 조건에 맞는 프로젝트가 없습니다.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {selectedProject && (
-                <section
-                  className="selected-project"
-                  aria-labelledby="selected-project-title"
-                >
-                  <div>
-                    <span className="selection-label">선택한 프로젝트</span>
-                    <h2 id="selected-project-title">{selectedProject.name}</h2>
-                    <p>{selectedProject.clientName || 'ERP 연동 대기'}</p>
-                  </div>
-                  <ol>
-                    <li className="is-complete">
-                      <Check aria-hidden="true" />
-                      <span>
-                        <strong>프로젝트 경계</strong>
-                        <small>별도 프로젝트 ID와 소유자 멤버십 확보</small>
-                      </span>
-                    </li>
-                    <li className="is-complete">
-                      <Check aria-hidden="true" />
-                      <span>
-                        <strong>감사 시작점</strong>
-                        <small>생성 actor·request ID 기록 완료</small>
-                      </span>
-                    </li>
-                    <li>
-                      <Check aria-hidden="true" />
-                      <span>
-                        <strong>로컬 비공개 저장</strong>
-                        <small>해시·형식·압축 구조 검사 활성</small>
-                      </span>
-                    </li>
-                  </ol>
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    disabled={!canUpload || reviewCases.length === 0}
-                    onClick={() =>
-                      reviewCases[0] && openSourceUpload(reviewCases[0].id)
-                    }
-                  >
-                    산출서와 집계표 등록 시작
-                  </button>
-                  <div className="case-workbench">
-                    <div className="case-heading">
-                      <div>
-                        <h3>검수 케이스</h3>
-                        <p>
-                          마감과 구조를 별도 케이스로 관리해 원본 계보와 결과가
-                          섞이지 않게 합니다.
-                        </p>
-                      </div>
-                      <div className="case-actions">
-                        <button
-                          className="secondary-action"
-                          type="button"
-                          disabled={caseSubmitting || caseState !== 'ready'}
-                          onClick={() => void createReviewCase('FIN')}
-                        >
-                          <Plus aria-hidden="true" /> 마감 검수 추가
-                        </button>
-                        <button
-                          className="secondary-action"
-                          type="button"
-                          disabled={caseSubmitting || caseState !== 'ready'}
-                          onClick={() => void createReviewCase('RC')}
-                        >
-                          <Plus aria-hidden="true" /> 구조 검수 추가
-                        </button>
-                      </div>
-                    </div>
-                    {caseState === 'loading' ? (
-                      <output className="case-empty">
-                        검수 케이스를 불러오는 중…
-                      </output>
-                    ) : caseState === 'error' ? (
-                      <div className="case-empty case-error" role="alert">
-                        <span>검수 케이스를 불러오지 못했습니다.</span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCaseReloadToken((value) => value + 1)
-                          }
-                        >
-                          다시 시도
-                        </button>
-                      </div>
-                    ) : reviewCases.length === 0 ? (
-                      <p className="case-empty">
-                        아직 검수 케이스가 없습니다. 마감 또는 구조 검수를
-                        추가하세요.
-                      </p>
-                    ) : (
-                      <ul className="case-list">
-                        {reviewCases.map((reviewCase) => (
-                          <li key={reviewCase.id}>
-                            <span className="case-discipline">
-                              {disciplineLabel(reviewCase.discipline)}
-                            </span>
-                            <span>
-                              <strong>{reviewCase.name}</strong>
-                              <small>
-                                {caseStatusLabel(reviewCase.status)}
-                              </small>
-                            </span>
-                            <button
-                              type="button"
-                              disabled={!canUpload || uploading}
-                              onClick={() => openSourceUpload(reviewCase.id)}
-                            >
-                              산출서와 집계표 등록
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {uploadCaseId && (
-                      <form
-                        className="source-upload-panel"
-                        onSubmit={(event) => void uploadSources(event)}
-                      >
-                        <div className="source-upload-heading">
-                          <div>
-                            <span className="selection-label">자료 등록</span>
-                            <h4>산출서와 집계표 원본 등록</h4>
-                            <p>
-                              XLSX·CSV만 허용합니다. 파일은 수정하지 않고 원본
-                              해시와 검증 근거를 별도로 저장합니다.
-                            </p>
-                          </div>
-                          <button
-                            className="icon-button"
-                            type="button"
-                            aria-label="자료 등록 닫기"
-                            disabled={uploading}
-                            onClick={closeSourceUpload}
-                          >
-                            <X aria-hidden="true" />
-                          </button>
-                        </div>
-                        <label className="source-file-picker">
-                          <Upload aria-hidden="true" />
-                          <span>
-                            <strong>파일 선택</strong>
-                            <small>
-                              산출서와 집계표를 함께 선택하세요 · 파일당 최대
-                              20MB
-                            </small>
-                          </span>
-                          <input
-                            type="file"
-                            accept=".xlsx,.csv"
-                            multiple
-                            required
-                            disabled={uploading}
-                            onChange={(event) =>
-                              setSourceFiles(
-                                Array.from(event.target.files ?? []),
-                              )
-                            }
-                          />
-                        </label>
-                        {sourceFiles.length > 0 && (
-                          <ul className="source-file-list">
-                            {sourceFiles.map((file) => (
-                              <li key={`${file.name}-${file.size}`}>
-                                <FileSpreadsheet aria-hidden="true" />
-                                <span>{file.name}</span>
-                                <small>{formatBytes(file.size)}</small>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <output
-                          className="source-upload-progress"
-                          aria-live="polite"
-                        >
-                          {uploadProgress}
-                        </output>
-                        <div className="form-actions">
-                          <button
-                            className="secondary-action"
-                            type="button"
-                            disabled={uploading}
-                            onClick={closeSourceUpload}
-                          >
-                            취소
-                          </button>
-                          <button
-                            className="primary-action"
-                            type="submit"
-                            disabled={uploading || sourceFiles.length === 0}
-                          >
-                            {uploading ? '검사·저장 중…' : '원본 검사 후 저장'}
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
-                </section>
-              )}
-
-              <section
-                className="readiness-strip"
-                aria-labelledby="readiness-title"
-              >
-                <div>
-                  <h2 id="readiness-title">검수 준비 기준</h2>
-                  <p>
-                    자료를 올리기 전부터 차단 기준과 판정 권한을 공개합니다.
-                  </p>
-                </div>
-                <dl>
-                  <div>
-                    <dt>Level A</dt>
-                    <dd>계산 근거가 모두 있을 때만 결정론 오류</dd>
-                  </div>
-                  <div>
-                    <dt>Level B</dt>
-                    <dd>비교 집단·표본·임계값을 함께 표시</dd>
-                  </div>
-                  <div>
-                    <dt>Level C</dt>
-                    <dd>AI·문맥 후보, 사람 확인 전 확정 금지</dd>
-                  </div>
-                </dl>
-              </section>
-            </section>
+        <main
+          id="main-content"
+          className="main-layout"
+          ref={mainHeadingRef}
+          tabIndex={-1}
+        >
+          {activeView === 'project-register' ? (
+            <ProjectRegistrationWorkspace
+              projects={projects}
+              visibleProjects={visibleProjects}
+              loadState={loadState}
+              message={message}
+              messageTone={messageTone}
+              showCreate={showCreate}
+              submitting={submitting}
+              query={query}
+              onQueryChange={setQuery}
+              onToggleCreate={() => setShowCreate((value) => !value)}
+              onRetry={() => {
+                setLoadState('loading');
+                setMessageTone('neutral');
+                void loadProjects();
+              }}
+              onCreateProject={(event) => void createProject(event)}
+              onSelectAndContinue={selectProject}
+            />
+          ) : activeView === 'project-data' ? (
+            <ProjectDataWorkspace
+              selectedProject={selectedProject}
+              reviewCases={caseState === 'ready' ? reviewCases : []}
+              caseState={caseState}
+              canUpload={Boolean(canUpload)}
+              caseSubmitting={caseSubmitting}
+              uploadCaseId={uploadCaseId}
+              sourceFiles={sourceFiles}
+              uploading={uploading}
+              uploadProgress={uploadProgress}
+              message={message}
+              messageTone={messageTone}
+              onOpenRegistration={() => navigate('project-register')}
+              onRetryCases={() => setCaseReloadToken((value) => value + 1)}
+              onCreateCase={(discipline) => void createReviewCase(discipline)}
+              onOpenUpload={openSourceUpload}
+              onCloseUpload={closeSourceUpload}
+              onFilesChange={setSourceFiles}
+              onUpload={(event) => void uploadSources(event)}
+            />
           ) : (
             <ModuleWorkspace
               view={activeView}
               selectedProject={selectedProject}
               reviewCases={caseState === 'ready' ? reviewCases : []}
-              onOpenProjects={() => setActiveView('projects')}
+              onOpenProjects={() => navigate('project-register')}
             />
           )}
         </main>
@@ -1060,41 +682,113 @@ export function ReviewStudio({
   );
 }
 
-function roleLabel(role: ProjectSummary['role']): string {
-  return {
-    workspace_admin: '관리자',
-    project_owner: '프로젝트 책임자',
-    reviewer: '검수자',
-    approver: '승인자',
-    viewer: '조회자',
-  }[role];
+function NavigationNode({
+  node,
+  activeView,
+  expandedGroups,
+  onNavigate,
+  onToggleGroup,
+  attentionCount,
+  depth = 0,
+}: {
+  node: StudioNavigationNode;
+  activeView: StudioView;
+  expandedGroups: Set<string>;
+  onNavigate: (view: StudioView) => void;
+  onToggleGroup: (id: string) => void;
+  attentionCount: number;
+  depth?: number;
+}) {
+  if (node.kind === 'item') {
+    const active = node.id === activeView;
+    return (
+      <button
+        className={`nav-item nav-depth-${depth}${active ? ' is-active' : ''}`}
+        data-tone={node.tone}
+        type="button"
+        aria-current={active ? 'page' : undefined}
+        onClick={() => onNavigate(node.id)}
+      >
+        <node.icon aria-hidden="true" />
+        {node.stage && <span className="nav-step-number">{node.stage}</span>}
+        <span className="nav-label">{node.label}</span>
+        {node.id === 'formula-ai' && attentionCount > 0 && (
+          <small>{attentionCount}</small>
+        )}
+      </button>
+    );
+  }
+  const expanded = expandedGroups.has(node.id);
+  const active = navigationContains(node, activeView);
+  return (
+    <div
+      className={`nav-group nav-depth-${depth}${active ? ' is-active' : ''}`}
+      data-tone={node.tone}
+    >
+      <button
+        className="nav-group-trigger"
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => {
+          onToggleGroup(node.id);
+          if (node.defaultView) onNavigate(node.defaultView);
+        }}
+      >
+        <node.icon aria-hidden="true" />
+        {node.stage && <span className="nav-step-number">{node.stage}</span>}
+        <span className="nav-label">{node.label}</span>
+        <ChevronRight
+          className={expanded ? 'is-expanded' : ''}
+          aria-hidden="true"
+        />
+      </button>
+      {expanded && (
+        <div className="nav-group-children">
+          {node.children.map((child) => (
+            <NavigationNode
+              key={child.id}
+              node={child}
+              activeView={activeView}
+              expandedGroups={expandedGroups}
+              onNavigate={onNavigate}
+              onToggleGroup={onToggleGroup}
+              attentionCount={attentionCount}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function caseStatusLabel(status: ReviewCaseSummary['status']): string {
-  return {
-    draft: '초안',
-    ready: '검수 준비',
-    reviewing: '검수 중',
-    needs_attention: '확인 필요',
-    awaiting_approval: '승인 대기',
-    approved: '승인 완료',
-    archived: '보관',
-  }[status];
+function navigationContains(
+  node: StudioNavigationNode,
+  view: StudioView,
+): boolean {
+  if (node.kind === 'item') return node.id === view;
+  return node.children.some((child) => navigationContains(child, view));
 }
 
-function disciplineLabel(discipline: ReviewCaseSummary['discipline']): string {
-  return discipline === 'RC' ? '구조' : '마감';
+function findNavigationStage(
+  nodes: readonly StudioNavigationNode[],
+  view: StudioView,
+): { label: string; stage: number | null; tone: string } | null {
+  for (const node of nodes) {
+    if (node.kind === 'item' && node.id === view)
+      return { label: node.label, stage: node.stage, tone: node.tone };
+    if (node.kind === 'group') {
+      const found = findNavigationStage(node.children, view);
+      if (found) return found;
+      if (node.defaultView === view)
+        return { label: node.label, stage: node.stage, tone: node.tone };
+    }
+  }
+  return null;
 }
 
 function declaredContentType(file: File): string {
   return file.name.toLocaleLowerCase().endsWith('.xlsx')
     ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     : 'text/csv';
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kilobytes = bytes / 1024;
-  if (kilobytes < 1024) return `${kilobytes.toFixed(1)} KB`;
-  return `${(kilobytes / 1024).toFixed(1)} MB`;
 }

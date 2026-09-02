@@ -70,31 +70,28 @@ test('project page exposes the full Korean workflow and persists a new project',
 }, testInfo) => {
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: '검수 프로젝트', level: 1 }),
+    page.getByRole('heading', {
+      name: '검수 프로젝트를 선택하세요',
+      level: 1,
+    }),
   ).toBeVisible();
   await expect(page.getByRole('status')).not.toContainText('불러오는 중');
   const testToken = `${testInfo.project.name.replace(/\W/gu, '').toUpperCase()}${Date.now()}`;
   const projectName = `브라우저 통합 검수 ${testToken}`;
-  await page.getByRole('button', { name: '새 프로젝트' }).click();
+  await page.getByRole('button', { name: '새 프로젝트 등록' }).click();
   await page.getByLabel('프로젝트명').fill(projectName);
   await page.getByLabel('발주처·고객사 (선택)').fill('로컬 자동시험');
   await page.getByRole('button', { name: '프로젝트 만들기' }).click();
   await expect(
-    page.getByRole('row', { name: new RegExp(projectName, 'u') }),
-  ).toBeVisible();
-  await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(projectName);
-  const projectRow = page.getByRole('row', {
-    name: new RegExp(projectName, 'u'),
-  });
-  await expect(projectRow).toBeVisible();
-  await projectRow.getByRole('button', { name: '검수 열기' }).click();
-  await expect(
-    page.getByRole('heading', { name: projectName, level: 2 }),
+    page.getByRole('heading', {
+      name: '산출서와 집계표를 등록하세요',
+      level: 1,
+    }),
   ).toBeVisible();
   await expect(
-    page.getByText('아직 검수 케이스가 없습니다.', { exact: false }),
+    page.getByText('먼저 팀별 검수 케이스를 만드세요.', { exact: true }),
   ).toBeVisible();
-  const addFinishCase = page.getByRole('button', { name: '마감 검수 추가' });
+  const addFinishCase = page.getByRole('button', { name: '마감팀 케이스' });
   await expect(addFinishCase).toBeEnabled();
   await addFinishCase.click();
   await expect(
@@ -103,7 +100,7 @@ test('project page exposes the full Korean workflow and persists a new project',
   await page
     .getByRole('button', { name: '산출서와 집계표 등록', exact: true })
     .click();
-  await page.getByLabel('파일 선택').setInputFiles([
+  await page.getByLabel('산출서와 집계표 선택').setInputFiles([
     {
       name: 'ＵＩ내부산출서.csv',
       mimeType: 'text/csv',
@@ -337,7 +334,7 @@ test('project page exposes the full Korean workflow and persists a new project',
   await page.getByRole('textbox', { name: '프로젝트 검색' }).fill(projectName);
   await page
     .getByRole('row', { name: new RegExp(projectName, 'u') })
-    .getByRole('button', { name: '검수 열기' })
+    .getByRole('button', { name: '선택하고 자료 등록' })
     .click();
   await expect(
     page.getByText(`${projectName} 마감 검수 1`, { exact: true }),
@@ -347,7 +344,10 @@ test('project page exposes the full Korean workflow and persists a new project',
 test('critical accessibility scan has no violations', async ({ page }) => {
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: '검수 프로젝트', level: 1 }),
+    page.getByRole('heading', {
+      name: '검수 프로젝트를 선택하세요',
+      level: 1,
+    }),
   ).toBeVisible();
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
@@ -364,24 +364,34 @@ test('mobile navigation opens with readable text labels', async ({
   );
   await page.goto('/');
   await expect(page.getByRole('status')).not.toContainText('불러오는 중');
-  const menuButton = page.getByRole('button', { name: '메뉴 열기' });
+  const menuButton = page.locator(
+    '.topbar button[aria-controls="primary-navigation"]',
+  );
+  await expect(page.getByRole('navigation')).toBeHidden();
   await menuButton.click();
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.workspace')).toHaveAttribute('inert', '');
+  await expect(page.locator('.workspace')).toHaveAttribute(
+    'aria-hidden',
+    'true',
+  );
   await expect(
-    page.getByRole('navigation').getByText('프로젝트·자료'),
+    page.getByRole('navigation').getByText('프로젝트 등록'),
   ).toBeVisible();
   await expect(
-    page.getByRole('navigation').getByText('산출식 이상치'),
+    page.getByRole('navigation').getByText('산출식 AI 검수'),
   ).toBeVisible();
   const closeButton = page.getByRole('button', { name: '메뉴 닫기' }).first();
   await expect(closeButton).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(
-    page.getByRole('navigation').getByRole('button', { name: '보고서·Excel' }),
+    page.getByRole('navigation').getByRole('button', { name: '설정' }),
   ).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(closeButton).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('navigation')).toBeHidden();
+  await expect(page.locator('.workspace')).not.toHaveAttribute('inert', '');
   await expect(menuButton).toBeFocused();
 });

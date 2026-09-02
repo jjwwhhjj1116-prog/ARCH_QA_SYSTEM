@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Actor } from '@/lib/domain/contracts';
+import { AccountAccessError, assertAccountAllowed } from './account-access';
 
 const USER_ID_HEADER = 'oai-authenticated-user-id';
 const USER_EMAIL_HEADER = 'oai-authenticated-user-email';
@@ -8,7 +9,13 @@ const USER_FULL_NAME_ENCODING_HEADER =
   'oai-authenticated-user-full-name-encoding';
 
 export class AuthenticationError extends Error {
-  readonly code = 'AUTHENTICATION_REQUIRED';
+  constructor(
+    message: string,
+    readonly code = 'AUTHENTICATION_REQUIRED',
+    readonly status = 401,
+  ) {
+    super(message);
+  }
 }
 
 const workspaceActorSchema = z.object({
@@ -20,7 +27,7 @@ const workspaceActorSchema = z.object({
 export function actorFromHeaders(
   headers: Headers,
   runtime: 'production' | 'development' | 'test',
-  options: { allowDevelopmentMock?: boolean } = {},
+  options: { allowDevelopmentMock?: boolean; allowedEmails?: string } = {},
 ): Actor {
   const id = headers.get(USER_ID_HEADER);
   const email = headers.get(USER_EMAIL_HEADER);
@@ -34,6 +41,18 @@ export function actorFromHeaders(
     const actor = workspaceActorSchema.safeParse({ id, email, displayName });
     if (!actor.success) {
       throw new AuthenticationError('인증 사용자 정보가 올바르지 않습니다.');
+    }
+    try {
+      assertAccountAllowed(
+        actor.data.email,
+        options.allowedEmails ?? process.env.APP_ALLOWED_EMAILS,
+        runtime,
+      );
+    } catch (error) {
+      if (error instanceof AccountAccessError) {
+        throw new AuthenticationError(error.message, error.code, error.status);
+      }
+      throw error;
     }
     return { ...actor.data, source: 'workspace' };
   }

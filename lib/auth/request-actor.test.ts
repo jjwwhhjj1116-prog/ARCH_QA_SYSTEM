@@ -26,11 +26,27 @@ describe('request actor', () => {
       'oai-authenticated-user-full-name': encodeURIComponent('김 검수'),
       'oai-authenticated-user-full-name-encoding': 'percent-encoded-utf-8',
     });
-    expect(actorFromHeaders(headers, 'production')).toMatchObject({
+    expect(
+      actorFromHeaders(headers, 'production', {
+        allowedEmails: 'reviewer@example.com',
+      }),
+    ).toMatchObject({
       id: 'user-1',
       displayName: '김 검수',
       source: 'workspace',
     });
+  });
+
+  it('rejects an authenticated but unapproved production account', () => {
+    const headers = new Headers({
+      'oai-authenticated-user-id': 'user-1',
+      'oai-authenticated-user-email': 'other@example.com',
+    });
+    expect(() =>
+      actorFromHeaders(headers, 'production', {
+        allowedEmails: 'jjwwhhjj1116@gmail.com',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'ACCOUNT_NOT_ALLOWED' }));
   });
 
   it('rejects malformed or oversized workspace identity headers', () => {

@@ -74,7 +74,7 @@ function failure(error: unknown, requestId: string): Response {
   let message = '산출서와 집계표 등록 준비를 완료하지 못했습니다.';
   let details: unknown;
   if (error instanceof AuthenticationError) {
-    status = 401;
+    status = error.status;
     code = error.code;
     message = error.message;
   } else if (error instanceof SourcePackageAccessError) {

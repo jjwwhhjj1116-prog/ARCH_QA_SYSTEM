@@ -78,7 +78,7 @@ function failure(error: unknown, requestId: string): Response {
   let message = '검수 케이스 요청을 처리하지 못했습니다.';
   let details: unknown;
   if (error instanceof AuthenticationError) {
-    status = 401;
+    status = error.status;
     code = error.code;
     message = error.message;
   } else if (error instanceof CaseAccessError) {

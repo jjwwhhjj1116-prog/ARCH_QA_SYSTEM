@@ -3,9 +3,9 @@ import './globals.css';
 import './qto-studio.css';
 
 export const metadata: Metadata = {
-  title: 'QTO QA & Analytics Studio',
+  title: 'CONCOST 기술본부 QC 스튜디오',
   description:
-    '산출서와 집계표의 근거·계보·검수 결과를 확인하는 사내 검수 시스템',
+    '산출서와 집계표의 근거·계보·AI 검수·수량산출 분석표를 관리하는 사내 QC 시스템',
 };
 
 export const viewport: Viewport = {
