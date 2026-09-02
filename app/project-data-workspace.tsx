@@ -4,21 +4,18 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
-  ChevronRight,
   FileSpreadsheet,
   Plus,
-  Search,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import { type SyntheticEvent, useMemo, useState } from 'react';
+import type { SyntheticEvent } from 'react';
 import type { ProjectSummary, ReviewCaseSummary } from '@/lib/domain/contracts';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import { StageHeading } from './project-registration-workspace';
 
 type Props = {
-  projects: ProjectSummary[];
   selectedProject: ProjectSummary | null;
   reviewCases: ReviewCaseSummary[];
   caseState: 'loading' | 'ready' | 'error';
@@ -43,7 +40,6 @@ type Props = {
   message: string;
   messageTone: 'neutral' | 'success' | 'error';
   onOpenRegistration: () => void;
-  onConfirmProject: (projectId: string) => void;
   onRetryCases: () => void;
   onCreateCase: (discipline: 'FIN' | 'RC') => void;
   onOpenUpload: (caseId: string) => void;
@@ -56,7 +52,6 @@ type Props = {
 };
 
 export function ProjectDataWorkspace({
-  projects,
   selectedProject,
   reviewCases,
   caseState,
@@ -76,7 +71,6 @@ export function ProjectDataWorkspace({
   message,
   messageTone,
   onOpenRegistration,
-  onConfirmProject,
   onRetryCases,
   onCreateCase,
   onOpenUpload,
@@ -87,15 +81,6 @@ export function ProjectDataWorkspace({
   onContinueToAiReview,
   onUpload,
 }: Props) {
-  const [candidateProjectId, setCandidateProjectId] = useState(
-    selectedProject?.id ?? '',
-  );
-  const projectChangePending = Boolean(
-    selectedProject &&
-    candidateProjectId &&
-    candidateProjectId !== selectedProject.id,
-  );
-
   return (
     <section
       className="project-workspace stage-workspace"
@@ -107,8 +92,8 @@ export function ProjectDataWorkspace({
         title="산출서와 집계표를 등록하세요"
         description={
           selectedProject
-            ? `${selectedProject.name} 전용 검수 케이스와 원본 자료만 표시합니다.`
-            : '프로젝트를 검색하고 확정한 뒤 해당 프로젝트에만 원본을 등록합니다.'
+            ? `${selectedProject.name}에 등록할 팀을 고르고 원본 자료를 업로드하세요.`
+            : '좌측 프로젝트 목록에서 자료를 등록할 프로젝트를 선택하세요.'
         }
         action={
           <button
@@ -130,29 +115,12 @@ export function ProjectDataWorkspace({
         <span>{message}</span>
       </output>
 
-      <ProjectContextSelector
-        projects={projects}
-        currentProject={selectedProject}
-        candidateId={candidateProjectId}
-        onCandidateChange={setCandidateProjectId}
-        onConfirmProject={onConfirmProject}
-        onOpenRegistration={onOpenRegistration}
-      />
-
-      {!selectedProject || projectChangePending ? (
+      {!selectedProject ? (
         <section className="project-data-locked" aria-live="polite">
           <FileSpreadsheet aria-hidden="true" />
           <div>
-            <h2>
-              {projectChangePending
-                ? '프로젝트 변경을 먼저 확정하세요.'
-                : '프로젝트 확정 후 자료 영역이 열립니다.'}
-            </h2>
-            <p>
-              {projectChangePending
-                ? '후보를 고른 상태에서는 이전 프로젝트에 잘못 저장하지 않도록 자료 영역을 잠급니다.'
-                : '위 검색 결과에서 프로젝트를 고르고 ‘이 프로젝트로 진행’을 누르세요.'}
-            </p>
+            <h2>좌측 프로젝트 목록에서 프로젝트를 선택하세요.</h2>
+            <p>선택 즉시 해당 프로젝트의 자료 등록 화면이 열립니다.</p>
           </div>
         </section>
       ) : (
@@ -482,225 +450,6 @@ function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
   return (
     sourcePackage.files.length > 0 &&
     sourcePackage.files.every((file) => file.status === 'stored')
-  );
-}
-
-function ProjectContextSelector({
-  projects,
-  currentProject,
-  candidateId,
-  onCandidateChange,
-  onConfirmProject,
-  onOpenRegistration,
-}: {
-  projects: ProjectSummary[];
-  currentProject: ProjectSummary | null;
-  candidateId: string;
-  onCandidateChange: (projectId: string) => void;
-  onConfirmProject: (projectId: string) => void;
-  onOpenRegistration: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  const matchingProjects = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    return projects.filter(
-      (project) =>
-        !normalized ||
-        `${project.name} ${project.clientName ?? ''}`
-          .toLocaleLowerCase()
-          .includes(normalized),
-    );
-  }, [projects, query]);
-  const candidates = matchingProjects.slice(0, 6);
-  const candidate =
-    projects.find((project) => project.id === candidateId) ?? null;
-  const candidateIsCurrent = candidate?.id === currentProject?.id;
-
-  return (
-    <section
-      className="project-context-panel"
-      aria-labelledby="project-context-title"
-    >
-      <div className="project-context-heading">
-        <div>
-          <span className="panel-kicker">PROJECT SELECTOR · RAG STATUS</span>
-          <h2 id="project-context-title">
-            자료를 등록할 프로젝트를 선택하세요
-          </h2>
-          <p>
-            이름으로 검색하거나 전체 목록에서 선택한 뒤 프로젝트 경계를
-            확정하세요.
-          </p>
-        </div>
-        <button
-          className="secondary-action"
-          type="button"
-          onClick={onOpenRegistration}
-        >
-          <Plus aria-hidden="true" /> 새 프로젝트 등록
-        </button>
-      </div>
-
-      <ol
-        className="project-context-rag"
-        aria-label="프로젝트 자료 등록 준비 단계"
-      >
-        <li data-state={candidate ? 'done' : 'current'}>
-          {candidate ? (
-            <Check aria-hidden="true" />
-          ) : (
-            <span className="rag-dot" aria-hidden="true" />
-          )}
-          <span>
-            <strong>1. 프로젝트 찾기</strong>
-            <small>검색 또는 전체 목록</small>
-          </span>
-        </li>
-        <li data-state={candidate ? 'done' : 'waiting'}>
-          {candidate ? (
-            <Check aria-hidden="true" />
-          ) : (
-            <span className="rag-dot" aria-hidden="true" />
-          )}
-          <span>
-            <strong>2. 선택 후보 확인</strong>
-            <small>{candidate ? candidate.name : '선택 대기'}</small>
-          </span>
-        </li>
-        <li
-          data-state={
-            candidateIsCurrent ? 'done' : candidate ? 'current' : 'waiting'
-          }
-        >
-          {candidateIsCurrent ? (
-            <Check aria-hidden="true" />
-          ) : (
-            <span className="rag-dot" aria-hidden="true" />
-          )}
-          <span>
-            <strong>3. 경계 확정</strong>
-            <small>
-              {candidate && !candidateIsCurrent
-                ? '변경 확정 대기'
-                : candidateIsCurrent
-                  ? '이 프로젝트에만 저장'
-                  : '확정 대기'}
-            </small>
-          </span>
-        </li>
-      </ol>
-
-      <div className="project-picker-methods">
-        <section className="project-picker-method">
-          <label className="project-picker-label" htmlFor="project-search">
-            프로젝트 검색
-          </label>
-          <div className="project-context-search">
-            <Search aria-hidden="true" />
-            <input
-              id="project-search"
-              type="search"
-              value={query}
-              aria-controls={
-                query.trim() ? 'project-search-results' : undefined
-              }
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="프로젝트명 또는 발주처 입력"
-            />
-          </div>
-          {query.trim() && (
-            <>
-              <output className="project-search-count" aria-live="polite">
-                검색 결과 {matchingProjects.length}개
-                {matchingProjects.length > 6 ? ' · 상위 6개 표시' : ''}
-              </output>
-              <div
-                id="project-search-results"
-                className="project-context-results"
-                role="radiogroup"
-                aria-label="프로젝트 검색 결과"
-              >
-                {candidates.map((project) => (
-                  <label
-                    key={project.id}
-                    className={candidateId === project.id ? 'is-selected' : ''}
-                  >
-                    <input
-                      type="radio"
-                      name="project-context-search-result"
-                      value={project.id}
-                      checked={candidateId === project.id}
-                      onChange={() => onCandidateChange(project.id)}
-                    />
-                    <span>
-                      <strong>{project.name}</strong>
-                      <small>{project.clientName || 'ERP 연동 대기'}</small>
-                    </span>
-                    {currentProject?.id === project.id && <em>현재 선택</em>}
-                  </label>
-                ))}
-                {candidates.length === 0 && (
-                  <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
-                )}
-              </div>
-            </>
-          )}
-        </section>
-
-        <div className="project-picker-divider" aria-hidden="true">
-          또는
-        </div>
-
-        <section className="project-picker-method">
-          <label className="project-picker-label" htmlFor="project-dropdown">
-            전체 프로젝트 목록
-          </label>
-          <select
-            id="project-dropdown"
-            className="project-context-select"
-            value={candidateId}
-            disabled={projects.length === 0}
-            onChange={(event) => onCandidateChange(event.target.value)}
-          >
-            <option value="" disabled>
-              프로젝트를 선택하세요
-            </option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name} · {project.clientName || 'ERP 연동 대기'}
-              </option>
-            ))}
-          </select>
-          <p>등록된 전체 프로젝트를 드롭다운에서 바로 선택할 수 있습니다.</p>
-        </section>
-
-        <section className="project-candidate-summary" aria-live="polite">
-          <div>
-            <span>선택 후보</span>
-            <strong>{candidate?.name || '아직 선택하지 않았습니다.'}</strong>
-            <small>
-              {candidate?.clientName ||
-                (candidate ? 'ERP 연동 대기' : '검색 또는 목록에서 선택')}
-            </small>
-          </div>
-          <button
-            className="project-context-confirm"
-            type="button"
-            disabled={!candidate || candidateIsCurrent}
-            onClick={() => candidate && onConfirmProject(candidate.id)}
-          >
-            {candidateIsCurrent
-              ? '현재 프로젝트로 확정됨'
-              : '이 프로젝트로 진행'}
-            {candidateIsCurrent ? (
-              <Check aria-hidden="true" />
-            ) : (
-              <ChevronRight aria-hidden="true" />
-            )}
-          </button>
-        </section>
-      </div>
-    </section>
   );
 }
 

@@ -91,6 +91,10 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(
     page.getByText('먼저 팀별 검수 케이스를 만드세요.', { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText('자료를 등록할 프로젝트를 선택하세요'),
+  ).toHaveCount(0);
+  await expect(page.getByText(/RAG STATUS/u)).toHaveCount(0);
   const addFinishCase = page.getByRole('button', { name: '마감팀' });
   await expect(addFinishCase).toBeEnabled();
   await addFinishCase.click();
@@ -126,6 +130,16 @@ test('project page exposes the full Korean workflow and persists a new project',
     .analyze();
   expect(selectedResults.violations).toEqual([]);
   await expect(page.getByText('초안', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }).click();
+  const aiChooser = page.getByRole('navigation', {
+    name: 'AI 검수 기능 선택',
+  });
+  await expect(
+    aiChooser.getByRole('button', { name: /산출식 AI 검수/u }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(
+    aiChooser.getByRole('button', { name: /중복 ITEM AI 검수/u }),
+  ).toBeVisible();
   const projectsResponse = await page.request.get('/api/projects');
   expect(projectsResponse.status()).toBe(200);
   const projectsBody = (await projectsResponse.json()) as {

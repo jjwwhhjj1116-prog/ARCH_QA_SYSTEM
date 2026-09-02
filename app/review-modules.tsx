@@ -311,11 +311,17 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
 
   return (
     <div className="analytics-workspace">
-      <ModuleHeading
-        title="산출식 AI 검수"
-        description={`${project.name}의 원 산출식을 부위·단위·건물 규모와 교차검토하고 PM 확인 목록으로 만듭니다.`}
-        status="Level A 결정론 우선 · AI는 설명만"
-      />
+      <h1 className="sr-only">산출식 AI 검수</h1>
+      <header className="review-module-context">
+        <div>
+          <span>현재 프로젝트</span>
+          <strong>{project.name}</strong>
+          <p>부위·단위·건물 규모를 기준으로 과대 산출식을 확인합니다.</p>
+        </div>
+        <span className="status-badge status-ready">
+          Level A 결정론 우선 · AI는 설명만
+        </span>
+      </header>
       <div className="module-toolbar">
         <div className="segmented-control" aria-label="팀 구분">
           {[
@@ -385,11 +391,19 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
 function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
   return (
     <div className="analytics-workspace">
-      <ModuleHeading
-        title="중복 아이템 AI 검수"
-        description={`${project.name}에서 여러 산출자가 만든 품목을 비교하되 원본은 자동 병합하지 않습니다.`}
-        status="부위 하드룰 우선 · PM 확정"
-      />
+      <h1 className="sr-only">중복 ITEM AI 검수</h1>
+      <header className="review-module-context">
+        <div>
+          <span>현재 프로젝트</span>
+          <strong>{project.name}</strong>
+          <p>
+            유사 품명·규격·재료코드를 비교하되 원본은 자동 병합하지 않습니다.
+          </p>
+        </div>
+        <span className="status-badge status-warning">
+          부위 하드룰 우선 · PM 확정
+        </span>
+      </header>
       <section className="glass-panel" aria-labelledby="duplicate-title">
         <div className="panel-heading">
           <div>

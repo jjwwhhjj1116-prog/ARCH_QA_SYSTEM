@@ -55,10 +55,12 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
     expect(screen.getByText('팀별 검수 케이스')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: '새 프로젝트 등록' }),
+      screen.getByRole('button', { name: '프로젝트 다시 선택' }),
     ).toBeVisible();
-    expect(screen.getByText('PROJECT SELECTOR · RAG STATUS')).toBeVisible();
-    expect(screen.getByLabelText('전체 프로젝트 목록')).toBeVisible();
+    expect(
+      screen.queryByText('자료를 등록할 프로젝트를 선택하세요'),
+    ).toBeNull();
+    expect(screen.queryByText(/RAG STATUS/u)).toBeNull();
   });
 
   it('asks once before project deletion without requiring the project name', async () => {
@@ -89,7 +91,7 @@ describe('ReviewStudio', () => {
     );
   });
 
-  it('supports both search and dropdown selection without changing the project before confirmation', async () => {
+  it('uses the sidebar and header selector without a redundant project picker', async () => {
     const projects = [
       projectFixture(
         'P1',
@@ -115,18 +117,14 @@ describe('ReviewStudio', () => {
       within(p1).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     await screen.findByText('먼저 팀별 검수 케이스를 만드세요.');
+    expect(screen.queryByText(/RAG STATUS/u)).toBeNull();
+    expect(
+      screen.queryByText('자료를 등록할 프로젝트를 선택하세요'),
+    ).toBeNull();
 
-    fireEvent.change(screen.getByLabelText('전체 프로젝트 목록'), {
+    fireEvent.change(screen.getByLabelText('현재 프로젝트'), {
       target: { value: projects[1].id },
     });
-    expect(screen.getByText('프로젝트 변경을 먼저 확정하세요.')).toBeVisible();
-    expect(screen.queryByText('팀별 검수 케이스')).toBeNull();
-
-    fireEvent.change(screen.getByLabelText('프로젝트 검색'), {
-      target: { value: 'P2' },
-    });
-    expect(screen.getByText('검색 결과 1개')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '이 프로젝트로 진행' }));
 
     expect(
       await screen.findByRole('region', { name: 'P2 프로젝트' }),
@@ -297,6 +295,18 @@ describe('ReviewStudio', () => {
     expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
     expect(
       screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+    );
+    const aiChooser = screen.getByRole('navigation', {
+      name: 'AI 검수 기능 선택',
+    });
+    expect(
+      within(aiChooser).getByRole('button', { name: /산출식 AI 검수/u }),
+    ).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(aiChooser).getByRole('button', { name: /중복 ITEM AI 검수/u }),
     ).toBeVisible();
     expect(packageListCalls).toBe(2);
   });

@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   Check,
   ChevronDown,
@@ -94,28 +95,47 @@ export function ReviewStudio({
   const [deletingSourcePackageId, setDeletingSourcePackageId] = useState<
     string | null
   >(null);
-  const [hasStoredSources, setHasStoredSources] = useState(false);
+  const [sourceReadiness, setSourceReadiness] = useState<{
+    projectId: string;
+    ready: boolean;
+  } | null>(null);
   const uploadKeyRef = useRef<string | null>(null);
   const sourcePackageScopeRef = useRef<string | null>(null);
+  const selectionEpochRef = useRef(0);
+  const uploadingRef = useRef(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const primarySidebarRef = useRef<HTMLElement>(null);
   const mainHeadingRef = useRef<HTMLElement>(null);
   const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
+  const hasStoredSources = Boolean(
+    selectedProjectId &&
+    sourceReadiness?.projectId === selectedProjectId &&
+    sourceReadiness.ready,
+  );
+
+  useEffect(() => {
+    uploadingRef.current = uploading;
+  }, [uploading]);
 
   const navigate = useCallback(
     (view: StudioView) => {
       setActiveView(view);
       if (mobileNav) {
         setMobileNav(false);
-        window.setTimeout(() => mainHeadingRef.current?.focus(), 0);
       }
+      window.setTimeout(() => {
+        mainHeadingRef.current?.focus({ preventScroll: true });
+        scrollPageToTop();
+      }, 0);
     },
     [mobileNav],
   );
 
   const selectProject = useCallback((projectId: string) => {
+    if (uploadingRef.current) return;
     if (selectedProjectIdRef.current !== projectId) {
+      selectionEpochRef.current += 1;
       selectedProjectIdRef.current = projectId;
       setSelectedProjectId(projectId);
       setReviewCases([]);
@@ -129,11 +149,33 @@ export function ReviewStudio({
       setSourcePackages([]);
       setSourcePackageState('ready');
       setSourcePackageError('');
-      setHasStoredSources(false);
+      setSourceReadiness(null);
       uploadKeyRef.current = null;
       sourcePackageScopeRef.current = null;
     }
     setActiveView('project-data');
+    window.setTimeout(scrollPageToTop, 0);
+  }, []);
+
+  const clearProjectSelection = useCallback(() => {
+    if (uploadingRef.current) return;
+    selectionEpochRef.current += 1;
+    selectedProjectIdRef.current = null;
+    setSelectedProjectId(null);
+    setReviewCases([]);
+    setUploadCaseId(null);
+    setSourceFiles([]);
+    setUploadProgress('');
+    setUploadStatus('idle');
+    setUploadCompletedCount(0);
+    setUploadFailures([]);
+    setSourcePackages([]);
+    setSourcePackageState('ready');
+    setSourcePackageError('');
+    setSourceReadiness(null);
+    uploadKeyRef.current = null;
+    sourcePackageScopeRef.current = null;
+    setActiveView('project-register');
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -320,6 +362,8 @@ export function ReviewStudio({
       reviewCaseId: string,
     ): Promise<SourcePackageSummary[] | null> => {
       const scope = `${projectId}:${reviewCaseId}`;
+      const selectionEpoch = selectionEpochRef.current;
+      if (selectedProjectIdRef.current !== projectId) return null;
       sourcePackageScopeRef.current = scope;
       setSourcePackageState('loading');
       setSourcePackageError('');
@@ -338,13 +382,25 @@ export function ReviewStudio({
               : '저장된 자료 묶음을 불러오지 못했습니다.',
           );
         }
-        if (sourcePackageScopeRef.current !== scope) return null;
+        if (
+          selectionEpochRef.current !== selectionEpoch ||
+          selectedProjectIdRef.current !== projectId ||
+          sourcePackageScopeRef.current !== scope
+        )
+          return null;
         setSourcePackages(body.data);
-        if (body.data.some(isFullyStoredPackage)) setHasStoredSources(true);
+        if (body.data.some(isFullyStoredPackage)) {
+          setSourceReadiness({ projectId, ready: true });
+        }
         setSourcePackageState('ready');
         return body.data;
       } catch (error) {
-        if (sourcePackageScopeRef.current !== scope) return null;
+        if (
+          selectionEpochRef.current !== selectionEpoch ||
+          selectedProjectIdRef.current !== projectId ||
+          sourcePackageScopeRef.current !== scope
+        )
+          return null;
         setSourcePackages([]);
         setSourcePackageState('error');
         setSourcePackageError(
@@ -429,6 +485,7 @@ export function ReviewStudio({
     const total = canonicalFiles.length;
     let completed = 0;
     let packageId: string | null = null;
+    uploadingRef.current = true;
     setUploading(true);
     setUploadStatus('uploading');
     setUploadCompletedCount(0);
@@ -567,7 +624,9 @@ export function ReviewStudio({
         `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
       );
       setUploadStatus('success');
-      setHasStoredSources(true);
+      if (selectedProjectIdRef.current === targetProjectId) {
+        setSourceReadiness({ projectId: targetProjectId, ready: true });
+      }
       setMessageTone('success');
       setMessage(
         `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
@@ -599,6 +658,7 @@ export function ReviewStudio({
           : `${completed}/${total}개 저장 응답 · 서버 목록 재확인에 실패했습니다. 목록을 다시 불러온 뒤 재시도하세요.`,
       );
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
     }
   }
@@ -627,10 +687,7 @@ export function ReviewStudio({
         current.filter((item) => item.id !== project.id),
       );
       if (selectedProjectIdRef.current === project.id) {
-        selectedProjectIdRef.current = null;
-        setSelectedProjectId(null);
-        setReviewCases([]);
-        setActiveView('project-register');
+        clearProjectSelection();
       }
       setMessageTone('success');
       setMessage(
@@ -683,7 +740,10 @@ export function ReviewStudio({
         (item) => item.id !== sourcePackage.id,
       );
       setSourcePackages(remaining);
-      setHasStoredSources(remaining.some(isFullyStoredPackage));
+      setSourceReadiness({
+        projectId: selectedProject.id,
+        ready: remaining.some(isFullyStoredPackage),
+      });
       setMessageTone('success');
       setMessage(
         '등록 자료 묶음을 목록에서 삭제했습니다. 원본과 감사 이력은 안전하게 보관했습니다.',
@@ -813,6 +873,7 @@ export function ReviewStudio({
                 aria-current={
                   selectedProjectId === project.id ? 'true' : undefined
                 }
+                disabled={uploading}
                 onClick={() => selectProject(project.id)}
               >
                 <FolderKanban aria-hidden="true" />
@@ -899,14 +960,10 @@ export function ReviewStudio({
               <span className="sr-only">현재 프로젝트</span>
               <select
                 value={selectedProjectId ?? ''}
+                disabled={uploading}
                 onChange={(event) => {
                   if (event.target.value) selectProject(event.target.value);
-                  else {
-                    selectedProjectIdRef.current = null;
-                    setSelectedProjectId(null);
-                    setReviewCases([]);
-                    setActiveView('project-register');
-                  }
+                  else clearProjectSelection();
                 }}
               >
                 <option value="">프로젝트 선택</option>
@@ -980,7 +1037,6 @@ export function ReviewStudio({
           ) : activeView === 'project-data' ? (
             <ProjectDataWorkspace
               key={selectedProject?.id ?? 'unselected-project-data'}
-              projects={projects}
               selectedProject={selectedProject}
               reviewCases={caseState === 'ready' ? reviewCases : []}
               caseState={caseState}
@@ -1000,7 +1056,6 @@ export function ReviewStudio({
               message={message}
               messageTone={messageTone}
               onOpenRegistration={() => navigate('project-register')}
-              onConfirmProject={selectProject}
               onRetryCases={() => setCaseReloadToken((value) => value + 1)}
               onCreateCase={(discipline) => void createReviewCase(discipline)}
               onOpenUpload={openSourceUpload}
@@ -1129,22 +1184,48 @@ function WorkflowRail({
         })}
       </ol>
       {activeStep === 2 && (
-        <nav className="workflow-subnav" aria-label="AI 검수 종류">
+        <nav className="ai-review-chooser" aria-label="AI 검수 기능 선택">
           <button
-            className={activeView === 'formula-ai' ? 'is-active' : undefined}
+            className={`ai-review-choice is-formula${activeView === 'formula-ai' ? ' is-active' : ''}`}
             type="button"
             aria-current={activeView === 'formula-ai' ? 'page' : undefined}
             onClick={() => onNavigate('formula-ai')}
           >
-            <FileScan aria-hidden="true" /> 산출식 이상치
+            <span className="ai-review-choice-icon">
+              <FileScan aria-hidden="true" />
+            </span>
+            <span className="ai-review-choice-copy">
+              <small>AI REVIEW 01</small>
+              <strong>산출식 AI 검수</strong>
+              <span>
+                건물 규모와 부위 기준을 벗어난 과대·이상 산출식을 찾습니다.
+              </span>
+            </span>
+            <span className="ai-review-choice-action">
+              {activeView === 'formula-ai' ? '현재 선택' : '검수 화면 열기'}
+              <ArrowRight aria-hidden="true" />
+            </span>
           </button>
           <button
-            className={activeView === 'duplicate-ai' ? 'is-active' : undefined}
+            className={`ai-review-choice is-duplicate${activeView === 'duplicate-ai' ? ' is-active' : ''}`}
             type="button"
             aria-current={activeView === 'duplicate-ai' ? 'page' : undefined}
             onClick={() => onNavigate('duplicate-ai')}
           >
-            <Layers3 aria-hidden="true" /> 중복 ITEM
+            <span className="ai-review-choice-icon">
+              <Layers3 aria-hidden="true" />
+            </span>
+            <span className="ai-review-choice-copy">
+              <small>AI REVIEW 02</small>
+              <strong>중복 ITEM AI 검수</strong>
+              <span>
+                유사 품명·규격·재료코드를 비교해 표준 통합 후보를 만듭니다.
+              </span>
+            </span>
+            <span className="ai-review-choice-action">
+              {activeView === 'duplicate-ai' ? '현재 선택' : '검수 화면 열기'}
+              <ArrowRight aria-hidden="true" />
+            </span>
           </button>
         </nav>
       )}
@@ -1186,9 +1267,9 @@ function workflowStage(
 ): { label: string; stage: number | null; tone: string } | null {
   if (view === 'settings') return { label: '설정', stage: null, tone: 'slate' };
   if (view === 'project-register' || view === 'project-data')
-    return { label: '자료 등록', stage: 1, tone: 'blue' };
+    return { label: '자료 등록', stage: 1, tone: 'amber' };
   if (view === 'formula-ai' || view === 'duplicate-ai')
-    return { label: 'AI 검수', stage: 2, tone: 'violet' };
+    return { label: 'AI 검수', stage: 2, tone: 'blue' };
   return { label: '수량산출 분석표', stage: 3, tone: 'emerald' };
 }
 
@@ -1197,6 +1278,11 @@ function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
     sourcePackage.files.length > 0 &&
     sourcePackage.files.every((file) => file.status === 'stored')
   );
+}
+
+function scrollPageToTop(): void {
+  if (/jsdom/i.test(window.navigator.userAgent)) return;
+  window.scrollTo({ top: 0, behavior: 'auto' });
 }
 
 function declaredContentType(file: File): string {
