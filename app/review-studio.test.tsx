@@ -7,6 +7,8 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewStudio } from './review-studio';
 
 afterEach(() => {
@@ -459,6 +461,78 @@ describe('ReviewStudio', () => {
     expect(screen.getByText('산출서와 집계표 원본 등록')).toBeVisible();
   });
 
+  it('keeps both review shortcuts synchronized across stored, busy, loading, error, and empty states', () => {
+    const project = projectFixture('P1', '상단 검수 버튼 확인');
+    const reviewCase = caseFixture(project.id, '마감팀');
+    const props = {
+      selectedProject: project,
+      reviewCases: [reviewCase],
+      caseState: 'ready',
+      canUpload: true,
+      caseSubmitting: false,
+      uploadCaseId: reviewCase.id,
+      sourceFiles: [],
+      uploading: false,
+      uploadProgress: '',
+      uploadStatus: 'idle',
+      uploadCompletedCount: 0,
+      uploadFailures: [],
+      sourcePackages: [
+        sourcePackageFixture({
+          projectId: project.id,
+          reviewCaseId: reviewCase.id,
+          status: 'stored',
+        }),
+      ],
+      sourcePackageState: 'ready',
+      sourcePackageError: '',
+      deletingSourcePackageId: null,
+      message: '',
+      messageTone: 'neutral',
+      onOpenRegistration: vi.fn(),
+      onRetryCases: vi.fn(),
+      onCreateCase: vi.fn(),
+      onOpenUpload: vi.fn(),
+      onCloseUpload: vi.fn(),
+      onFilesChange: vi.fn(),
+      onRetryPackages: vi.fn(),
+      onArchiveSourcePackage: vi.fn(),
+      onContinueToAiReview: vi.fn(),
+      onUpload: vi.fn(),
+    } satisfies ComponentProps<typeof ProjectDataWorkspace>;
+    const { rerender } = render(<ProjectDataWorkspace {...props} />);
+    for (const [sourcePackageState, uploading, enabled] of [
+      ['ready', false, true],
+      ['ready', true, false],
+      ['loading', false, false],
+      ['error', false, false],
+    ] as const) {
+      rerender(
+        <ProjectDataWorkspace
+          {...props}
+          sourcePackageState={sourcePackageState}
+          uploading={uploading}
+        />,
+      );
+      const actions = screen.getAllByRole('button', {
+        name: /STEP 2 · AI 검수 시작/u,
+      });
+      expect(actions).toHaveLength(2);
+      for (const action of actions) {
+        expect(action).toHaveAttribute('type', 'button');
+        if (enabled) expect(action).toBeEnabled();
+        else expect(action).toBeDisabled();
+        fireEvent.click(action);
+      }
+    }
+    expect(props.onContinueToAiReview).toHaveBeenCalledTimes(2);
+    expect(props.onUpload).not.toHaveBeenCalled();
+    rerender(<ProjectDataWorkspace {...props} sourcePackages={[]} />);
+    expect(
+      screen.queryAllByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+    ).toHaveLength(0);
+  });
+
   it('stores source files, verifies the persisted package, and keeps the exact result visible', async () => {
     const project = projectFixture('P100', '웹 검수 프로젝트');
     const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
@@ -569,11 +643,22 @@ describe('ReviewStudio', () => {
     expect(screen.getByText('원본 저장 완료')).toBeVisible();
     expect(screen.getByText('1/1개 저장 ·', { exact: false })).toBeVisible();
     expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
-    expect(
-      screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
-    ).toBeVisible();
+    const continueActions = screen.getAllByRole('button', {
+      name: /STEP 2 · AI 검수 시작/u,
+    });
+    expect(continueActions).toHaveLength(2);
+    for (const action of continueActions) {
+      expect(action).toBeVisible();
+      expect(action).toBeEnabled();
+      expect(action).toHaveAttribute('type', 'button');
+    }
+    const topActions = screen.getByRole('group', {
+      name: '자료 등록 상단 작업',
+    });
     fireEvent.click(
-      screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+      within(topActions).getByRole('button', {
+        name: /STEP 2 · AI 검수 시작/u,
+      }),
     );
     const aiChooser = screen.getByRole('navigation', {
       name: 'AI 검수 기능 선택',

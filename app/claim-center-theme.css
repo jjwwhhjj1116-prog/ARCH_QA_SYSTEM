@@ -690,6 +690,41 @@ body {
   box-shadow: 0 18px 42px rgba(31, 53, 78, 0.12);
 }
 
+.source-upload-heading {
+  flex-wrap: wrap;
+}
+
+.source-upload-heading > div:first-child {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.source-upload-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.source-upload-heading-actions .next-step-action {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .source-upload-heading-actions {
+    width: 100%;
+  }
+  .source-upload-heading-actions .next-step-action {
+    flex: 1;
+  }
+  .source-upload-heading-actions .icon-button {
+    flex-shrink: 0;
+  }
+}
+
 .studio-shell .source-file-picker {
   border: 1px dashed #8eb8dd;
   background: #f0f7fd;

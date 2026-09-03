@@ -130,7 +130,10 @@ test('project page exposes the full Korean workflow and persists a new project',
     .analyze();
   expect(selectedResults.violations).toEqual([]);
   await expect(page.getByText('초안', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }).click();
+  await page
+    .getByRole('group', { name: '자료 등록 상단 작업' })
+    .getByRole('button', { name: /STEP 2 · AI 검수 시작/u })
+    .click();
   const aiChooser = page.getByRole('navigation', {
     name: 'AI 검수 기능 선택',
   });

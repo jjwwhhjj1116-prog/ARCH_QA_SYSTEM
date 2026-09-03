@@ -87,6 +87,17 @@ export function ProjectDataWorkspace({
     (item) =>
       item.discipline === activeCase?.discipline && item.status !== 'archived',
   );
+  const hasStoredSources = sourcePackages.some(hasUsableStoredSources);
+  const continueToAiReviewAction = hasStoredSources ? (
+    <button
+      className="next-step-action"
+      type="button"
+      disabled={uploading || sourcePackageState !== 'ready'}
+      onClick={onContinueToAiReview}
+    >
+      STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
+    </button>
+  ) : null;
   return (
     <section
       className="project-workspace stage-workspace"
@@ -240,15 +251,21 @@ export function ProjectDataWorkspace({
                       XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다.
                     </p>
                   </div>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="자료 등록 닫기"
-                    disabled={uploading}
-                    onClick={onCloseUpload}
+                  <fieldset
+                    className="source-upload-heading-actions"
+                    aria-label="자료 등록 상단 작업"
                   >
-                    <X aria-hidden="true" />
-                  </button>
+                    {continueToAiReviewAction}
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label="자료 등록 닫기"
+                      disabled={uploading}
+                      onClick={onCloseUpload}
+                    >
+                      <X aria-hidden="true" />
+                    </button>
+                  </fieldset>
                 </div>
                 <label className="source-file-picker">
                   <Upload aria-hidden="true" />
@@ -418,7 +435,7 @@ export function ProjectDataWorkspace({
                     </ul>
                   )}
                 </section>
-                {sourcePackages.some(hasUsableStoredSources) && (
+                {hasStoredSources && (
                   <section
                     className="next-step-panel"
                     aria-labelledby="next-step-title"
@@ -439,14 +456,7 @@ export function ProjectDataWorkspace({
                         미평가로 표시합니다.
                       </p>
                     </div>
-                    <button
-                      className="next-step-action"
-                      type="button"
-                      disabled={uploading || sourcePackageState !== 'ready'}
-                      onClick={onContinueToAiReview}
-                    >
-                      STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
-                    </button>
+                    {continueToAiReviewAction}
                   </section>
                 )}
                 <div className="form-actions">
