@@ -91,6 +91,153 @@ describe('ReviewStudio', () => {
     );
   });
 
+  it('creates projects inside the sidebar without closing the current workspace first', async () => {
+    const existing = projectFixture('P1', '기존 프로젝트');
+    const created = projectFixture('P2', '왼쪽 등록 프로젝트');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects' && init?.method === 'POST')
+          return jsonResponse(created, 201);
+        if (url === '/api/projects') return jsonResponse([existing]);
+        if (url.endsWith('/cases')) return jsonResponse([]);
+        throw new Error(`Unexpected request: ${url}`);
+      });
+    renderStudio();
+    const nav = screen.getByRole('navigation', { name: '프로젝트' });
+    fireEvent.click(
+      await within(nav).findByRole('button', { name: /기존 프로젝트 ERP/u }),
+    );
+    await screen.findByText('등록할 팀 선택');
+    fireEvent.click(within(nav).getByRole('button', { name: '새 프로젝트' }));
+    const form = within(nav).getByRole('form', { name: '새 프로젝트 등록' });
+    expect(screen.getByRole('region', { name: '기존 프로젝트' })).toBeVisible();
+    fireEvent.change(
+      within(form).getByRole('textbox', { name: '프로젝트명' }),
+      { target: { value: created.name } },
+    );
+    fireEvent.change(within(form).getByRole('textbox', { name: /발주처/u }), {
+      target: { value: '테스트 발주처' },
+    });
+    fireEvent.submit(form);
+    expect(
+      await screen.findByRole('region', { name: created.name }),
+    ).toBeVisible();
+    expect(within(nav).queryByRole('form')).toBeNull();
+    const requests = fetchSpy.mock.calls.filter(
+      ([, init]) => init?.method === 'POST',
+    );
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(requests[0][1]?.body as string)).toMatchObject({
+      name: created.name,
+      clientName: '테스트 발주처',
+    });
+  });
+
+  it('keeps sidebar deletion cancelable and retryable, then clears a deleted current project', async () => {
+    const project = projectFixture('P1', '왼쪽 삭제 프로젝트');
+    let failDelete = true;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects') return jsonResponse([project]);
+        if (url.endsWith('/cases')) return jsonResponse([]);
+        if (
+          url === `/api/projects/${project.id}` &&
+          init?.method === 'DELETE'
+        ) {
+          if (failDelete)
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: 'TEST_ERROR',
+                  message: '삭제를 완료하지 못했습니다.',
+                  requestId: 'test',
+                },
+              }),
+              { status: 500 },
+            );
+          return jsonResponse({
+            ...project,
+            status: 'archived',
+            deletionMode: 'archive',
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+    renderStudio();
+    const nav = screen.getByRole('navigation', { name: '프로젝트' });
+    fireEvent.click(
+      await within(nav).findByRole('button', {
+        name: /왼쪽 삭제 프로젝트 ERP/u,
+      }),
+    );
+    await screen.findByText('등록할 팀 선택');
+    const remove = within(nav).getByRole('button', {
+      name: `${project.name} 삭제`,
+    });
+    expect(
+      remove.closest('.sidebar-project-item')?.querySelector('button button'),
+    ).toBeNull();
+    remove.focus();
+    fireEvent.click(remove);
+    let dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: '취소' }));
+    expect(
+      fetchSpy.mock.calls.filter(([, init]) => init?.method === 'DELETE'),
+    ).toHaveLength(0);
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      project.id,
+    );
+    fireEvent.click(remove);
+    dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+    expect(
+      await within(dialog).findByText('삭제를 완료하지 못했습니다.'),
+    ).toBeVisible();
+    expect(
+      within(nav).getByRole('button', { name: `${project.name} 삭제` }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      project.id,
+    );
+    failDelete = false;
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() =>
+      expect(
+        within(nav).queryByRole('button', { name: `${project.name} 삭제` }),
+      ).toBeNull(),
+    );
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      '',
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() =>
+      expect(
+        within(nav).getByRole('button', { name: '새 프로젝트' }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it('does not expose a sidebar delete action to a viewer', async () => {
+    const project = {
+      ...projectFixture('P1', '조회 전용 프로젝트'),
+      role: 'viewer',
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse([project]));
+    renderStudio();
+    const nav = screen.getByRole('navigation', { name: '프로젝트' });
+    expect(
+      await within(nav).findByRole('button', {
+        name: /조회 전용 프로젝트 ERP/u,
+      }),
+    ).toBeVisible();
+    expect(within(nav).queryByRole('button', { name: /삭제/u })).toBeNull();
+  });
+
   it('uses the sidebar and header selector without a redundant project picker', async () => {
     const projects = [
       projectFixture(

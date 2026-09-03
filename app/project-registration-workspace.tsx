@@ -32,9 +32,7 @@ type Props = {
     event: SyntheticEvent<HTMLFormElement, SubmitEvent>,
   ) => void;
   onSelectAndContinue: (projectId: string) => void;
-  onArchiveProject: (
-    project: ProjectSummary,
-  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  onRequestArchive: (project: ProjectSummary) => void;
 };
 
 export function ProjectRegistrationWorkspace({
@@ -52,34 +50,8 @@ export function ProjectRegistrationWorkspace({
   onRetry,
   onCreateProject,
   onSelectAndContinue,
-  onArchiveProject,
+  onRequestArchive,
 }: Props) {
-  const archiveDialogRef = useRef<HTMLDialogElement>(null);
-  const [archiveTarget, setArchiveTarget] = useState<ProjectSummary | null>(
-    null,
-  );
-  const [archiveError, setArchiveError] = useState('');
-
-  useEffect(() => {
-    if (archiveTarget && !archiveDialogRef.current?.open) {
-      if (typeof archiveDialogRef.current?.showModal === 'function') {
-        archiveDialogRef.current.showModal();
-      } else {
-        archiveDialogRef.current?.setAttribute('open', '');
-      }
-    }
-  }, [archiveTarget]);
-
-  function closeArchiveDialog() {
-    if (typeof archiveDialogRef.current?.close === 'function') {
-      archiveDialogRef.current.close();
-    } else {
-      archiveDialogRef.current?.removeAttribute('open');
-    }
-    setArchiveTarget(null);
-    setArchiveError('');
-  }
-
   return (
     <section
       className="project-workspace stage-workspace"
@@ -116,62 +88,11 @@ export function ProjectRegistrationWorkspace({
       </output>
 
       {showCreate && (
-        <form className="create-project-panel" onSubmit={onCreateProject}>
-          <div className="form-heading">
-            <div>
-              <span className="panel-kicker">PROJECT REGISTRATION</span>
-              <h2>새 프로젝트 등록</h2>
-              <p>
-                프로젝트 코드는 입력하지 않습니다. ERP와 같은 프로젝트명을
-                사용하세요.
-              </p>
-            </div>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="등록 화면 닫기"
-              onClick={onToggleCreate}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </div>
-          <div className="form-grid">
-            <label>
-              프로젝트명
-              <input
-                name="name"
-                required
-                minLength={2}
-                maxLength={120}
-                placeholder="예: 덕천3구역 재건축"
-              />
-            </label>
-            <label>
-              발주처·고객사 <span>(선택)</span>
-              <input
-                name="clientName"
-                maxLength={120}
-                placeholder="예: 한화건설"
-              />
-            </label>
-          </div>
-          <div className="form-actions">
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={onToggleCreate}
-            >
-              취소
-            </button>
-            <button
-              className="primary-action"
-              type="submit"
-              disabled={submitting}
-            >
-              {submitting ? '등록 중…' : '프로젝트 만들기'}
-            </button>
-          </div>
-        </form>
+        <ProjectCreationForm
+          submitting={submitting}
+          onCreateProject={onCreateProject}
+          onToggleCreate={onToggleCreate}
+        />
       )}
 
       <div className="project-toolbar">
@@ -273,7 +194,7 @@ export function ProjectRegistrationWorkspace({
                         className="project-archive-action"
                         type="button"
                         disabled={archivingProjectId === project.id}
-                        onClick={() => setArchiveTarget(project)}
+                        onClick={() => onRequestArchive(project)}
                       >
                         <Trash2 aria-hidden="true" />
                         {archivingProjectId === project.id
@@ -293,81 +214,200 @@ export function ProjectRegistrationWorkspace({
           )}
         </div>
       )}
-
-      <dialog
-        ref={archiveDialogRef}
-        className="archive-project-dialog"
-        aria-labelledby="archive-project-title"
-        aria-describedby="archive-project-description"
-        onCancel={(event) => {
-          event.preventDefault();
-          if (archiveTarget && archivingProjectId === archiveTarget.id) return;
-          closeArchiveDialog();
-        }}
-        onClose={() => {
-          setArchiveTarget(null);
-          setArchiveError('');
-        }}
-      >
-        {archiveTarget && (
-          <form
-            method="dialog"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              setArchiveError('');
-              const result = await onArchiveProject(archiveTarget);
-              if (result.ok) closeArchiveDialog();
-              else setArchiveError(result.message);
-            }}
-          >
-            <div className="dialog-heading">
-              <div>
-                <span className="panel-kicker">PROJECT ARCHIVE</span>
-                <h2 id="archive-project-title">
-                  프로젝트를 목록에서 삭제할까요?
-                </h2>
-              </div>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="프로젝트 삭제 창 닫기"
-                disabled={archivingProjectId === archiveTarget.id}
-                onClick={closeArchiveDialog}
-              >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-            <p id="archive-project-description">
-              <strong>{archiveTarget.name}</strong> 프로젝트를 정말 삭제할까요?
-              목록에서는 사라지지만 원본 자료와 검수 이력은 안전하게 보관됩니다.
-            </p>
-            {archiveError && (
-              <p className="archive-project-error" role="alert">
-                <AlertTriangle aria-hidden="true" /> {archiveError}
-              </p>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="secondary-action"
-                disabled={archivingProjectId === archiveTarget.id}
-                onClick={closeArchiveDialog}
-              >
-                취소
-              </button>
-              <button
-                type="submit"
-                className="danger-action"
-                disabled={archivingProjectId === archiveTarget.id}
-              >
-                <Trash2 aria-hidden="true" />
-                {archivingProjectId === archiveTarget.id ? '삭제 중…' : '삭제'}
-              </button>
-            </div>
-          </form>
-        )}
-      </dialog>
     </section>
+  );
+}
+
+export function ProjectCreationForm({
+  submitting,
+  onCreateProject,
+  onToggleCreate,
+  compact = false,
+  error,
+}: {
+  submitting: boolean;
+  onCreateProject: Props['onCreateProject'];
+  onToggleCreate: () => void;
+  compact?: boolean;
+  error?: string;
+}) {
+  return (
+    <form
+      aria-label="새 프로젝트 등록"
+      className={`create-project-panel${compact ? ' sidebar-create-project' : ''}`}
+      onSubmit={onCreateProject}
+    >
+      <div className="form-heading">
+        <div>
+          <h2>새 프로젝트 등록</h2>
+          <p>
+            프로젝트 코드는 입력하지 않습니다. ERP와 같은 프로젝트명을
+            사용하세요.
+          </p>
+        </div>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="등록 화면 닫기"
+          disabled={submitting}
+          onClick={onToggleCreate}
+        >
+          <X aria-hidden="true" />
+        </button>
+      </div>
+      <div className="form-grid">
+        <label>
+          프로젝트명
+          <input
+            name="name"
+            disabled={submitting}
+            required
+            minLength={2}
+            maxLength={120}
+            placeholder="예: 덕천3구역 재건축"
+          />
+        </label>
+        <label>
+          발주처·고객사 <span>(선택)</span>
+          <input
+            name="clientName"
+            disabled={submitting}
+            maxLength={120}
+            placeholder="예: 한화건설"
+          />
+        </label>
+      </div>
+      {error && (
+        <p className="archive-project-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button
+          className="secondary-action"
+          type="button"
+          disabled={submitting}
+          onClick={onToggleCreate}
+        >
+          취소
+        </button>
+        <button className="primary-action" type="submit" disabled={submitting}>
+          {submitting ? '등록 중…' : '프로젝트 만들기'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function ProjectArchiveDialog({
+  archiveTarget,
+  archivingProjectId,
+  onArchiveProject,
+  onClose,
+}: {
+  archiveTarget: ProjectSummary;
+  archivingProjectId: string | null;
+  onArchiveProject: (
+    project: ProjectSummary,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  onClose: () => void;
+}) {
+  const archiveDialogRef = useRef<HTMLDialogElement>(null);
+  const [archiveError, setArchiveError] = useState('');
+
+  useEffect(() => {
+    if (archiveTarget && !archiveDialogRef.current?.open) {
+      if (typeof archiveDialogRef.current?.showModal === 'function') {
+        archiveDialogRef.current.showModal();
+      } else {
+        archiveDialogRef.current?.setAttribute('open', '');
+      }
+    }
+  }, [archiveTarget]);
+
+  function closeArchiveDialog() {
+    if (typeof archiveDialogRef.current?.close === 'function') {
+      archiveDialogRef.current.close();
+    } else {
+      archiveDialogRef.current?.removeAttribute('open');
+    }
+    onClose();
+    setArchiveError('');
+  }
+
+  return (
+    <dialog
+      ref={archiveDialogRef}
+      className="archive-project-dialog"
+      aria-labelledby="archive-project-title"
+      aria-describedby="archive-project-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (archiveTarget && archivingProjectId === archiveTarget.id) return;
+        closeArchiveDialog();
+      }}
+      onClose={() => {
+        onClose();
+        setArchiveError('');
+      }}
+    >
+      {archiveTarget && (
+        <form
+          method="dialog"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setArchiveError('');
+            const result = await onArchiveProject(archiveTarget);
+            if (result.ok) closeArchiveDialog();
+            else setArchiveError(result.message);
+          }}
+        >
+          <div className="dialog-heading">
+            <div>
+              <h2 id="archive-project-title">
+                프로젝트를 목록에서 삭제할까요?
+              </h2>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="프로젝트 삭제 창 닫기"
+              disabled={archivingProjectId === archiveTarget.id}
+              onClick={closeArchiveDialog}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          <p id="archive-project-description">
+            <strong>{archiveTarget.name}</strong> 프로젝트를 정말 삭제할까요?
+            목록에서는 사라지지만 원본 자료와 검수 이력은 안전하게 보관됩니다.
+          </p>
+          {archiveError && (
+            <p className="archive-project-error" role="alert">
+              <AlertTriangle aria-hidden="true" /> {archiveError}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="secondary-action"
+              disabled={archivingProjectId === archiveTarget.id}
+              onClick={closeArchiveDialog}
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              className="danger-action"
+              disabled={archivingProjectId === archiveTarget.id}
+            >
+              <Trash2 aria-hidden="true" />
+              {archivingProjectId === archiveTarget.id ? '삭제 중…' : '삭제'}
+            </button>
+          </div>
+        </form>
+      )}
+    </dialog>
   );
 }
 

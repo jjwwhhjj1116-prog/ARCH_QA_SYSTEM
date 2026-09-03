@@ -810,7 +810,7 @@ body {
   color: #697481;
   font-size: 11px;
 }
-.selected-project ol {
+.selected-project > ol {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
@@ -818,30 +818,30 @@ body {
   padding: 0;
   list-style: none;
 }
-.selected-project li {
+.selected-project > ol > li {
   display: grid;
   grid-template-columns: 22px 1fr;
   gap: 7px;
   min-width: 0;
   color: #687481;
 }
-.selected-project li svg {
+.selected-project > ol > li svg {
   width: 17px;
   height: 17px;
   color: #9aa4ae;
 }
-.selected-project li.is-complete svg {
+.selected-project > ol > li.is-complete svg {
   color: #268c50;
 }
-.selected-project li span {
+.selected-project > ol > li span {
   display: grid;
   gap: 3px;
 }
-.selected-project li strong {
+.selected-project > ol > li strong {
   color: #2c3742;
   font-size: 11px;
 }
-.selected-project li small {
+.selected-project > ol > li small {
   font-size: 9px;
   line-height: 1.4;
 }

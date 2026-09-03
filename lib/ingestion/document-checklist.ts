@@ -33,7 +33,7 @@ const summaries: DocumentRequirement[] = [
     group: 'summary',
     pattern: /동별.*집계/u,
     description:
-      '동 단위 수량을 확인합니다. 여러 동의 수량 분포와 집계 범위를 비교할 때 사용합니다.',
+      '중복 아이템 검수의 기준 자료입니다. 전체 아이템을 공종 간 대조해 중복 코드와 공종 오배치 의심을 확인합니다.',
   },
   {
     id: 'floor',

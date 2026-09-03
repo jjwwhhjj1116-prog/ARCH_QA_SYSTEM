@@ -39,7 +39,11 @@ import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
-import { ProjectRegistrationWorkspace } from './project-registration-workspace';
+import {
+  ProjectArchiveDialog,
+  ProjectCreationForm,
+  ProjectRegistrationWorkspace,
+} from './project-registration-workspace';
 import { ModuleWorkspace, type StudioView } from './review-modules';
 
 type LoadState = 'loading' | 'ready' | 'error';
@@ -65,7 +69,13 @@ export function ReviewStudio({
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [message, setMessage] = useState('프로젝트를 불러오는 중입니다.');
   const [messageTone, setMessageTone] = useState<MessageTone>('neutral');
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState<'sidebar' | 'workspace' | null>(
+    null,
+  );
+  const [createError, setCreateError] = useState('');
+  const [archiveTarget, setArchiveTarget] = useState<ProjectSummary | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [archivingProjectId, setArchivingProjectId] = useState<string | null>(
     null,
@@ -104,6 +114,10 @@ export function ReviewStudio({
   const sourcePackageScopeRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
   const uploadingRef = useRef(false);
+  const archivingProjectRef = useRef(false);
+  const submittingProjectRef = useRef(false);
+  const sidebarAddRef = useRef<HTMLButtonElement>(null);
+  const archiveTriggerRef = useRef<HTMLElement | null>(null);
   const teamSelectionPendingRef = useRef(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -723,6 +737,13 @@ export function ReviewStudio({
   async function archiveProject(
     project: ProjectSummary,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (uploadingRef.current || archivingProjectRef.current) {
+      return {
+        ok: false,
+        message: '진행 중인 저장 또는 삭제가 끝난 뒤 다시 시도하세요.',
+      };
+    }
+    archivingProjectRef.current = true;
     setArchivingProjectId(project.id);
     try {
       const response = await fetch(`/api/projects/${project.id}`, {
@@ -760,6 +781,7 @@ export function ReviewStudio({
       setMessage(failureMessage);
       return { ok: false, message: failureMessage };
     } finally {
+      archivingProjectRef.current = false;
       setArchivingProjectId(null);
     }
   }
@@ -821,7 +843,10 @@ export function ReviewStudio({
     event: SyntheticEvent<HTMLFormElement, SubmitEvent>,
   ) {
     event.preventDefault();
+    if (uploadingRef.current || submittingProjectRef.current) return;
+    submittingProjectRef.current = true;
     setSubmitting(true);
+    setCreateError('');
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch('/api/projects', {
@@ -847,9 +872,16 @@ export function ReviewStudio({
         `${body.data.name} 프로젝트를 만들었습니다. 다음 단계에서 자료를 등록하세요.`,
       );
       setMessageTone('success');
-      setShowCreate(false);
+      setShowCreate(null);
+      setQuery('');
+      setMobileNav(false);
       selectProject(body.data.id);
     } catch (error) {
+      setCreateError(
+        error instanceof Error
+          ? error.message
+          : '프로젝트를 만들지 못했습니다.',
+      );
       setMessageTone('error');
       setMessage(
         error instanceof Error
@@ -857,11 +889,29 @@ export function ReviewStudio({
           : '프로젝트를 만들지 못했습니다.',
       );
     } finally {
+      submittingProjectRef.current = false;
       setSubmitting(false);
     }
   }
 
   const stage = workflowStage(activeView);
+
+  function requestArchiveProject(project: ProjectSummary) {
+    if (uploadingRef.current || archivingProjectRef.current) return;
+    archiveTriggerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setArchiveTarget(project);
+  }
+
+  function closeArchiveDialog() {
+    setArchiveTarget(null);
+    window.setTimeout(() => {
+      const trigger = archiveTriggerRef.current;
+      (trigger?.isConnected ? trigger : sidebarAddRef.current)?.focus();
+    }, 0);
+  }
 
   return (
     <div className="studio-shell" data-current-stage={stage?.tone ?? 'neutral'}>
@@ -896,15 +946,32 @@ export function ReviewStudio({
         </div>
         <nav className="primary-nav project-sidebar-nav" aria-label="프로젝트">
           <button
+            ref={sidebarAddRef}
             className="sidebar-project-add"
             type="button"
+            disabled={uploading || submitting}
+            aria-expanded={showCreate === 'sidebar'}
+            aria-controls="sidebar-project-create"
             onClick={() => {
-              setShowCreate(true);
-              navigate('project-register');
+              setCreateError('');
+              setShowCreate((value) =>
+                value === 'sidebar' ? null : 'sidebar',
+              );
             }}
           >
             <FolderPlus aria-hidden="true" /> 새 프로젝트
           </button>
+          {showCreate === 'sidebar' && (
+            <div id="sidebar-project-create">
+              <ProjectCreationForm
+                compact
+                submitting={submitting}
+                error={createError}
+                onCreateProject={(event) => void createProject(event)}
+                onToggleCreate={() => setShowCreate(null)}
+              />
+            </div>
+          )}
           <div className="sidebar-project-heading">
             <span>프로젝트 목록</span>
             <strong>{projects.length}</strong>
@@ -921,24 +988,38 @@ export function ReviewStudio({
           </label>
           <div className="sidebar-project-list">
             {visibleProjects.map((project) => (
-              <button
+              <div
+                className={`sidebar-project-item${selectedProjectId === project.id ? ' is-current' : ''}`}
                 key={project.id}
-                className={
-                  selectedProjectId === project.id ? 'is-current' : undefined
-                }
-                type="button"
-                aria-current={
-                  selectedProjectId === project.id ? 'true' : undefined
-                }
-                disabled={uploading}
-                onClick={() => selectProject(project.id)}
               >
-                <FolderKanban aria-hidden="true" />
-                <span>
-                  <strong>{project.name}</strong>
-                  <small>{project.clientName || 'ERP 연동 대기'}</small>
-                </span>
-              </button>
+                <button
+                  className="sidebar-project-select"
+                  type="button"
+                  aria-current={
+                    selectedProjectId === project.id ? 'true' : undefined
+                  }
+                  disabled={uploading}
+                  onClick={() => selectProject(project.id)}
+                >
+                  <FolderKanban aria-hidden="true" />
+                  <span>
+                    <strong>{project.name}</strong>
+                    <small>{project.clientName || 'ERP 연동 대기'}</small>
+                  </span>
+                </button>
+                {(project.role === 'workspace_admin' ||
+                  project.role === 'project_owner') && (
+                  <button
+                    className="sidebar-project-delete"
+                    type="button"
+                    aria-label={`${project.name} 삭제`}
+                    disabled={uploading || archivingProjectId !== null}
+                    onClick={() => requestArchiveProject(project)}
+                  >
+                    {archivingProjectId === project.id ? '삭제 중' : '삭제'}
+                  </button>
+                )}
+              </div>
             ))}
             {loadState === 'ready' && visibleProjects.length === 0 && (
               <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
@@ -1076,12 +1157,17 @@ export function ReviewStudio({
               loadState={loadState}
               message={message}
               messageTone={messageTone}
-              showCreate={showCreate}
+              showCreate={showCreate === 'workspace'}
               submitting={submitting}
               archivingProjectId={archivingProjectId}
               query={query}
               onQueryChange={setQuery}
-              onToggleCreate={() => setShowCreate((value) => !value)}
+              onToggleCreate={() => {
+                setCreateError('');
+                setShowCreate((value) =>
+                  value === 'workspace' ? null : 'workspace',
+                );
+              }}
               onRetry={() => {
                 setLoadState('loading');
                 setMessageTone('neutral');
@@ -1089,7 +1175,7 @@ export function ReviewStudio({
               }}
               onCreateProject={(event) => void createProject(event)}
               onSelectAndContinue={selectProject}
-              onArchiveProject={archiveProject}
+              onRequestArchive={requestArchiveProject}
             />
           ) : activeView === 'project-data' ? (
             <ProjectDataWorkspace
@@ -1142,6 +1228,14 @@ export function ReviewStudio({
           )}
         </main>
       </div>
+      {archiveTarget && (
+        <ProjectArchiveDialog
+          archiveTarget={archiveTarget}
+          archivingProjectId={archivingProjectId}
+          onArchiveProject={archiveProject}
+          onClose={closeArchiveDialog}
+        />
+      )}
     </div>
   );
 }

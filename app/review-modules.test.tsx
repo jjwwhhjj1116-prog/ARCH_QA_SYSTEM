@@ -112,6 +112,26 @@ describe('ModuleWorkspace', () => {
     expect(screen.getByText('N/A · 원천 미등록')).toBeVisible();
   });
 
+  it('uses the building summary across trades and separates suspected trade misclassification from duplicates', () => {
+    render(
+      <ModuleWorkspace
+        view="duplicate-ai"
+        selectedProject={project}
+        reviewCases={[]}
+        onOpenProjects={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole('heading', { name: '공종 오배치 · 중복 아이템 확인' }),
+    ).toBeVisible();
+    expect(screen.getAllByText(/동별집계표/u).length).toBeGreaterThan(0);
+    expect(screen.getByText(/미장 아이템이 금속공사/u)).toBeVisible();
+    expect(screen.getByText(/PM이 확인/u)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '예시 화면 · 실행 불가' }),
+    ).toBeDisabled();
+  });
+
   it('renders the selected trade without fabricating a quantity result', () => {
     render(
       <ModuleWorkspace

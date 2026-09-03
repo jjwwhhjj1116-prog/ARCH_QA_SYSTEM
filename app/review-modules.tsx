@@ -397,7 +397,8 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
           <span>현재 프로젝트</span>
           <strong>{project.name}</strong>
           <p>
-            유사 품명·규격·재료코드를 비교하되 원본은 자동 병합하지 않습니다.
+            동별집계표의 전체 아이템을 기준으로 공종 오배치와 중복
+            품명·규격·재료코드를 확인합니다. 원본은 자동 병합하지 않습니다.
           </p>
         </div>
         <span className="status-badge status-warning">
@@ -407,9 +408,10 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
       <section className="glass-panel" aria-labelledby="duplicate-title">
         <div className="panel-heading">
           <div>
-            <h2 id="duplicate-title">재료코드 통합 후보</h2>
+            <h2 id="duplicate-title">공종 오배치 · 중복 아이템 확인</h2>
             <p>
-              품명과 괄호 안 규격, 단위, 부위, 적용범위 교집합을 함께 봅니다.
+              기준 자료: 동별집계표. 공종이 달라도 전체 아이템을 비교하며
+              품명·규격·단위·부위·적용범위를 함께 봅니다.
             </p>
           </div>
           <span className="status-badge status-pending">
@@ -457,6 +459,11 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
           <article className="merge-card guardrail-card">
             <ShieldCheck aria-hidden="true" />
             <h3>자동 통합 금지</h3>
+            <p>
+              미장 아이템이 금속공사에 배치된 경우처럼 현재 공종과 예상 공종이
+              다른 항목은 ‘공종 오배치 의심’으로 구분하고 PM이 확인합니다.
+              공종이 다르다는 이유로 비교 대상에서 빼지 않습니다.
+            </p>
             <p>
               내벽≠외벽, 바닥≠천장, 바탕재≠최종마감재는 후보 단계에서
               차단합니다.
