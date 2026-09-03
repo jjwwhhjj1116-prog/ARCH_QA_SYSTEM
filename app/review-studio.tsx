@@ -36,6 +36,7 @@ import type {
 } from '@/lib/domain/contracts';
 import { canonicalSourceFilename } from '@/lib/imports/source-filename';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
+import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ProjectRegistrationWorkspace } from './project-registration-workspace';
@@ -103,6 +104,7 @@ export function ReviewStudio({
   const sourcePackageScopeRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
   const uploadingRef = useRef(false);
+  const teamSelectionPendingRef = useRef(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const primarySidebarRef = useRef<HTMLElement>(null);
@@ -110,6 +112,8 @@ export function ReviewStudio({
   const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
   const hasStoredSources = Boolean(
     selectedProjectId &&
+    !uploading &&
+    sourcePackageState === 'ready' &&
     sourceReadiness?.projectId === selectedProjectId &&
     sourceReadiness.ready,
   );
@@ -310,15 +314,40 @@ export function ReviewStudio({
   }, [caseReloadToken, selectedProjectId]);
 
   async function createReviewCase(discipline: 'FIN' | 'RC') {
-    if (!selectedProject) return;
+    if (
+      !selectedProject ||
+      !canUpload ||
+      caseState !== 'ready' ||
+      uploadingRef.current ||
+      teamSelectionPendingRef.current
+    )
+      return;
+    const existing = reviewCases.find(
+      (item) => item.discipline === discipline && item.status !== 'archived',
+    );
+    if (existing) {
+      if (
+        reviewCases.find((item) => item.id === uploadCaseId)?.discipline !==
+        discipline
+      )
+        openSourceUpload(existing.id);
+      return;
+    }
+    if (
+      sourceFiles.length > 0 &&
+      !window.confirm('선택한 미저장 파일을 비우고 팀을 바꿀까요?')
+    )
+      return;
     const target = selectedProject;
+    const selectionEpoch = selectionEpochRef.current;
+    teamSelectionPendingRef.current = true;
     setCaseSubmitting(true);
     try {
       const response = await fetch(`/api/projects/${target.id}/cases`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name: `${target.name} ${discipline === 'RC' ? '구조' : '마감'} 검수 ${reviewCases.length + 1}`,
+          name: `${target.name} ${discipline === 'RC' ? '구조팀' : '마감팀'}`,
           discipline,
         }),
       });
@@ -332,10 +361,16 @@ export function ReviewStudio({
             : '검수 케이스를 만들지 못했습니다.',
         );
       }
-      if (selectedProjectIdRef.current === target.id) {
+      if (
+        selectedProjectIdRef.current === target.id &&
+        selectionEpochRef.current === selectionEpoch
+      ) {
         setReviewCases((current) => [body.data, ...current]);
         setMessageTone('success');
-        setMessage(`${body.data.name} 케이스를 만들었습니다.`);
+        setMessage(
+          `${discipline === 'RC' ? '구조팀' : '마감팀'}을 선택했습니다. 산출서와 집계표를 등록하세요.`,
+        );
+        activateSourceUpload(body.data.id);
       }
       setProjects((current) =>
         current.map((project) =>
@@ -352,6 +387,7 @@ export function ReviewStudio({
           : '검수 케이스를 만들지 못했습니다.',
       );
     } finally {
+      teamSelectionPendingRef.current = false;
       setCaseSubmitting(false);
     }
   }
@@ -389,9 +425,10 @@ export function ReviewStudio({
         )
           return null;
         setSourcePackages(body.data);
-        if (body.data.some(isFullyStoredPackage)) {
-          setSourceReadiness({ projectId, ready: true });
-        }
+        setSourceReadiness({
+          projectId,
+          ready: body.data.some(hasUsableStoredSources),
+        });
         setSourcePackageState('ready');
         return body.data;
       } catch (error) {
@@ -415,7 +452,24 @@ export function ReviewStudio({
   );
 
   function openSourceUpload(reviewCaseId: string) {
+    if (
+      !selectedProject ||
+      uploadingRef.current ||
+      reviewCaseId === uploadCaseId
+    )
+      return;
+    if (
+      sourceFiles.length > 0 &&
+      !window.confirm('선택한 미저장 파일을 비우고 자료 기록을 바꿀까요?')
+    )
+      return;
+    activateSourceUpload(reviewCaseId);
+  }
+
+  function activateSourceUpload(reviewCaseId: string) {
     if (!selectedProject) return;
+    setSourceReadiness(null);
+    setSourcePackages([]);
     uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
     setUploadCaseId(reviewCaseId);
     setSourceFiles([]);
@@ -625,7 +679,10 @@ export function ReviewStudio({
       );
       setUploadStatus('success');
       if (selectedProjectIdRef.current === targetProjectId) {
-        setSourceReadiness({ projectId: targetProjectId, ready: true });
+        setSourceReadiness({
+          projectId: targetProjectId,
+          ready: Boolean(persistedPackages?.some(hasUsableStoredSources)),
+        });
       }
       setMessageTone('success');
       setMessage(
@@ -742,7 +799,7 @@ export function ReviewStudio({
       setSourcePackages(remaining);
       setSourceReadiness({
         projectId: selectedProject.id,
-        ready: remaining.some(isFullyStoredPackage),
+        ready: remaining.some(hasUsableStoredSources),
       });
       setMessageTone('success');
       setMessage(
@@ -1271,13 +1328,6 @@ function workflowStage(
   if (view === 'formula-ai' || view === 'duplicate-ai')
     return { label: 'AI 검수', stage: 2, tone: 'blue' };
   return { label: '수량산출 분석표', stage: 3, tone: 'emerald' };
-}
-
-function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
-  return (
-    sourcePackage.files.length > 0 &&
-    sourcePackage.files.every((file) => file.status === 'stored')
-  );
 }
 
 function scrollPageToTop(): void {

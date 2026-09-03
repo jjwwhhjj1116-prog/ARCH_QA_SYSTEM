@@ -792,7 +792,7 @@ function SettingsWorkspace() {
         status="서버 보안 설정"
       />
       <section
-        className="glass-panel ai-settings-panel"
+        className="glass-panel ai-settings-panel ai-settings-panel--gemini"
         aria-labelledby="ai-settings-title"
       >
         <div className="panel-heading">
@@ -847,7 +847,7 @@ function SettingsWorkspace() {
         </div>
       </section>
       <section
-        className="glass-panel ai-settings-panel"
+        className="glass-panel ai-settings-panel ai-settings-panel--memory"
         aria-labelledby="memory-settings-title"
       >
         <div className="panel-heading">

@@ -22,6 +22,8 @@ Use this file as the human-readable index of accepted architecture and product d
 | D-016 | 2026-09-02 | Keep Gemini credentials server-only; expose only configuration readiness and an authenticated connection test until review input mapping is implemented                                                  | Accepted   | `lib/server/ai/gemini-config.ts`, settings API          | AI / Platform       |
 | D-017 | 2026-09-02 | Use the Claim Center light visual system, one left-side project boundary, a three-step rail, and two equal primary AI review choices; remove the redundant right-side selector and dark gradient banners | Accepted   | `DESIGN.md`, `app/review-studio.tsx`, browser evidence  | Main / UI reviewer  |
 
+D-018 (2026-09-03, Accepted): 팀 선택은 기존 계보를 재사용하며 파일명 체크리스트는 제출 안내로만 사용한다. 일부 자료가 누락되어도 서버 저장 확인된 자료로 다음 단계에 진입할 수 있다. 근거: [ADR-005](adr/ADR-005-team-selection-and-document-availability.md). Owner: Main / Platform reviewer.
+
 ## Status values
 
 - `Proposed`: awaiting evidence or owner sign-off.

@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Check,
   FileSpreadsheet,
-  Plus,
   Trash2,
   Upload,
   X,
@@ -13,6 +12,8 @@ import {
 import type { SyntheticEvent } from 'react';
 import type { ProjectSummary, ReviewCaseSummary } from '@/lib/domain/contracts';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
+import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
+import { SourceDocumentChecklist } from './source-document-checklist';
 import { StageHeading } from './project-registration-workspace';
 
 type Props = {
@@ -81,6 +82,11 @@ export function ProjectDataWorkspace({
   onContinueToAiReview,
   onUpload,
 }: Props) {
+  const activeCase = reviewCases.find((item) => item.id === uploadCaseId);
+  const teamCases = reviewCases.filter(
+    (item) =>
+      item.discipline === activeCase?.discipline && item.status !== 'archived',
+  );
   return (
     <section
       className="project-workspace stage-workspace"
@@ -139,67 +145,89 @@ export function ProjectDataWorkspace({
           <div className="case-workbench">
             <div className="case-heading">
               <div>
-                <span className="panel-kicker">REVIEW CASE</span>
-                <h3>팀별 검수 케이스</h3>
-                <p>구조팀과 마감팀 자료를 독립 계보로 관리합니다.</p>
+                <h3>등록할 팀 선택</h3>
+                <p>팀을 선택하면 산출서와 집계표를 바로 등록할 수 있습니다.</p>
               </div>
-              <div className="case-actions">
+              <fieldset className="team-selector">
+                <legend className="sr-only">등록할 팀</legend>
                 <button
-                  className="secondary-action"
+                  className="team-choice team-choice--finish"
                   type="button"
-                  disabled={caseSubmitting || caseState !== 'ready'}
+                  aria-pressed={activeCase?.discipline === 'FIN'}
+                  disabled={
+                    !canUpload ||
+                    uploading ||
+                    caseSubmitting ||
+                    caseState !== 'ready'
+                  }
                   onClick={() => onCreateCase('FIN')}
                 >
-                  <Plus aria-hidden="true" /> 마감팀
+                  마감팀
                 </button>
                 <button
-                  className="secondary-action"
+                  className="team-choice team-choice--structure"
                   type="button"
-                  disabled={caseSubmitting || caseState !== 'ready'}
+                  aria-pressed={activeCase?.discipline === 'RC'}
+                  disabled={
+                    !canUpload ||
+                    uploading ||
+                    caseSubmitting ||
+                    caseState !== 'ready'
+                  }
                   onClick={() => onCreateCase('RC')}
                 >
-                  <Plus aria-hidden="true" /> 구조팀
+                  구조팀
                 </button>
-              </div>
+              </fieldset>
             </div>
 
             {caseState === 'loading' ? (
-              <output className="case-empty">검수 케이스를 불러오는 중…</output>
+              <output className="case-empty">
+                팀별 저장 내역을 불러오는 중…
+              </output>
             ) : caseState === 'error' ? (
               <div className="case-empty case-error" role="alert">
-                <span>검수 케이스를 불러오지 못했습니다.</span>
+                <span>팀별 저장 내역을 불러오지 못했습니다.</span>
                 <button type="button" onClick={onRetryCases}>
                   다시 시도
                 </button>
               </div>
-            ) : reviewCases.length === 0 ? (
-              <div className="case-empty">
-                <strong>먼저 팀별 검수 케이스를 만드세요.</strong>
-                <span>
-                  그 다음 각 케이스에 산출서와 집계표를 등록할 수 있습니다.
-                </span>
-              </div>
+            ) : !activeCase ? (
+              <p className="team-selection-hint">
+                팀을 선택하면 바로 자료를 등록할 수 있습니다.
+              </p>
             ) : (
-              <ul className="case-list">
-                {reviewCases.map((reviewCase) => (
-                  <li key={reviewCase.id}>
-                    <span className="case-discipline">
-                      {reviewCase.discipline === 'RC' ? '구조팀' : '마감팀'}
-                    </span>
-                    <span>
-                      <strong>{reviewCase.name}</strong>
-                      <small>{caseStatusLabel(reviewCase.status)}</small>
-                    </span>
-                    <button
-                      type="button"
-                      disabled={!canUpload || uploading}
-                      onClick={() => onOpenUpload(reviewCase.id)}
+              <div className="team-storage-context">
+                <span>
+                  {activeCase.discipline === 'FIN' ? '마감팀' : '구조팀'} 자료
+                  등록
+                </span>
+                <small>{caseStatusLabel(activeCase.status)}</small>
+                {teamCases.length > 1 ? (
+                  <div>
+                    <label htmlFor="team-source-history">이전 자료 기록</label>
+                    <select
+                      id="team-source-history"
+                      aria-describedby="team-source-history-note"
+                      value={activeCase.id}
+                      disabled={uploading || caseSubmitting}
+                      onChange={(event) => onOpenUpload(event.target.value)}
                     >
-                      산출서와 집계표 등록
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      {teamCases.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                    <small id="team-source-history-note">
+                      기존 {teamCases.length}개 기록을 보존했습니다. 이전 파일은
+                      해당 기록을 선택해 확인하세요.
+                    </small>
+                  </div>
+                ) : (
+                  <small>{activeCase.name}</small>
+                )}
+              </div>
             )}
 
             {uploadCaseId && (
@@ -250,6 +278,13 @@ export function ProjectDataWorkspace({
                       </li>
                     ))}
                   </ul>
+                )}
+                {activeCase && sourcePackageState === 'ready' && (
+                  <SourceDocumentChecklist
+                    discipline={activeCase.discipline}
+                    files={sourceFiles}
+                    packages={sourcePackages}
+                  />
                 )}
                 <output
                   className={`source-upload-progress is-${uploadStatus}`}
@@ -383,7 +418,7 @@ export function ProjectDataWorkspace({
                     </ul>
                   )}
                 </section>
-                {sourcePackages.some(isFullyStoredPackage) && (
+                {sourcePackages.some(hasUsableStoredSources) && (
                   <section
                     className="next-step-panel"
                     aria-labelledby="next-step-title"
@@ -392,18 +427,22 @@ export function ProjectDataWorkspace({
                       <Check />
                     </span>
                     <div>
-                      <span className="selection-label">STEP 1 완료</span>
+                      <span className="selection-label">
+                        저장된 자료로 다음 단계 진행 가능
+                      </span>
                       <h5 id="next-step-title">
-                        자료 저장을 확인했습니다. AI 검수를 시작하세요.
+                        저장된 자료로 AI 검수 단계로 이동하세요.
                       </h5>
                       <p>
-                        서버에서 전 파일 저장이 확인된 자료 묶음이 있습니다.
-                        다음 화면에서 산출식 이상치부터 검수합니다.
+                        저장에 실패했거나 미등록인 자료는 제외하고 진행합니다.
+                        검수 전 입력 매핑이 필요하며, 근거가 없는 항목은
+                        미평가로 표시합니다.
                       </p>
                     </div>
                     <button
                       className="next-step-action"
                       type="button"
+                      disabled={uploading || sourcePackageState !== 'ready'}
                       onClick={onContinueToAiReview}
                     >
                       STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
@@ -443,13 +482,6 @@ export function ProjectDataWorkspace({
 function canArchiveSourcePackage(sourcePackage: SourcePackageSummary): boolean {
   return ['draft', 'receiving', 'blocked', 'rejected'].includes(
     sourcePackage.status,
-  );
-}
-
-function isFullyStoredPackage(sourcePackage: SourcePackageSummary): boolean {
-  return (
-    sourcePackage.files.length > 0 &&
-    sourcePackage.files.every((file) => file.status === 'stored')
   );
 }
 

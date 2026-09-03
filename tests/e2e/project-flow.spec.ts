@@ -89,7 +89,9 @@ test('project page exposes the full Korean workflow and persists a new project',
     }),
   ).toBeVisible();
   await expect(
-    page.getByText('먼저 팀별 검수 케이스를 만드세요.', { exact: true }),
+    page.getByText('팀을 선택하면 바로 자료를 등록할 수 있습니다.', {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     page.getByText('자료를 등록할 프로젝트를 선택하세요'),
@@ -99,11 +101,9 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(addFinishCase).toBeEnabled();
   await addFinishCase.click();
   await expect(
-    page.getByText(`${projectName} 마감 검수 1`, { exact: true }),
+    page.getByText(`${projectName} 마감팀`, { exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole('button', { name: '산출서와 집계표 등록', exact: true })
-    .click();
+  await page.getByRole('button', { name: '마감팀', exact: true }).click();
   await page.getByLabel('산출서와 집계표 선택').setInputFiles([
     {
       name: 'ＵＩ내부산출서.csv',
@@ -157,7 +157,7 @@ test('project page exposes the full Korean workflow and persists a new project',
     data: Array<{ id: string; name: string }>;
   };
   const caseId = casesBody.data.find(
-    (reviewCase) => reviewCase.name === `${projectName} 마감 검수 1`,
+    (reviewCase) => reviewCase.name === `${projectName} 마감팀`,
   )?.id;
   expect(caseId).toBeTruthy();
   const takeoffBody = Buffer.from('품명,수량\n도장,12.5\n', 'utf8');
@@ -381,7 +381,7 @@ test('project page exposes the full Korean workflow and persists a new project',
     .getByRole('button', { name: '선택하고 자료 등록' })
     .click();
   await expect(
-    page.getByText(`${projectName} 마감 검수 1`, { exact: true }),
+    page.getByText(`${projectName} 마감팀`, { exact: true }),
   ).toBeVisible();
 });
 

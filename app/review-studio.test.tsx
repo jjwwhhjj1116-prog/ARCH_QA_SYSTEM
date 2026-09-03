@@ -43,7 +43,7 @@ describe('ReviewStudio', () => {
     mockProjects([project]);
     renderStudio();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
-    expect(screen.queryByText('팀별 검수 케이스')).toBeNull();
+    expect(screen.queryByText('등록할 팀 선택')).toBeNull();
     expect(screen.queryByText('산출서와 집계표 원본 등록')).toBeNull();
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -53,7 +53,7 @@ describe('ReviewStudio', () => {
         name: '산출서와 집계표를 등록하세요',
       }),
     ).toBeVisible();
-    expect(screen.getByText('팀별 검수 케이스')).toBeVisible();
+    expect(screen.getByText('등록할 팀 선택')).toBeVisible();
     expect(
       screen.getByRole('button', { name: '프로젝트 다시 선택' }),
     ).toBeVisible();
@@ -116,7 +116,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(
       within(p1).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    await screen.findByText('먼저 팀별 검수 케이스를 만드세요.');
+    await screen.findByText('팀을 선택하면 바로 자료를 등록할 수 있습니다.');
     expect(screen.queryByText(/RAG STATUS/u)).toBeNull();
     expect(
       screen.queryByText('자료를 등록할 프로젝트를 선택하세요'),
@@ -129,7 +129,7 @@ describe('ReviewStudio', () => {
     expect(
       await screen.findByRole('region', { name: 'P2 프로젝트' }),
     ).toBeVisible();
-    expect(screen.getByText('팀별 검수 케이스')).toBeVisible();
+    expect(screen.getByText('등록할 팀 선택')).toBeVisible();
   });
 
   it('shows an actionable error instead of a blank surface', async () => {
@@ -150,37 +150,166 @@ describe('ReviewStudio', () => {
     expect(screen.getByRole('button', { name: '다시 시도' })).toBeVisible();
   });
 
-  it('creates and displays a FIN case inside the selected project', async () => {
+  it('creates a team once and opens its upload form on repeated selection', async () => {
     const project = projectFixture('P100', '웹 검수 프로젝트');
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = requestUrl(input);
-      if (url === '/api/projects') {
-        return new Response(
-          JSON.stringify({ data: [project], requestId: 'r1' }),
-        );
-      }
-      if (init?.method === 'POST') {
-        return new Response(
-          JSON.stringify({
-            data: caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1'),
-            requestId: 'r3',
-          }),
-          { status: 201 },
-        );
-      }
-      return new Response(JSON.stringify({ data: [], requestId: 'r2' }));
-    });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects') {
+          return new Response(
+            JSON.stringify({ data: [project], requestId: 'r1' }),
+          );
+        }
+        if (init?.method === 'POST') {
+          return new Response(
+            JSON.stringify({
+              data: caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1'),
+              requestId: 'r3',
+            }),
+            { status: 201 },
+          );
+        }
+        return new Response(JSON.stringify({ data: [], requestId: 'r2' }));
+      });
     renderStudio();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    await screen.findByText('먼저 팀별 검수 케이스를 만드세요.');
+    await screen.findByText('팀을 선택하면 바로 자료를 등록할 수 있습니다.');
     fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
     expect(
       await screen.findByText('웹 검수 프로젝트 마감 검수 1'),
     ).toBeVisible();
     expect(screen.getByText('초안')).toBeVisible();
+    expect(screen.getByText('산출서와 집계표 원본 등록')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
+    expect(
+      fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(1);
+  });
+
+  it('keeps legacy same-team records selectable and permits partial stored sources', async () => {
+    const project = projectFixture('P100', '팀 기록 프로젝트');
+    const records = [
+      caseFixture(project.id, '마감 이전 기록 2'),
+      caseFixture(project.id, '마감 이전 기록 1'),
+    ];
+    const partial = sourcePackageFixture({
+      projectId: project.id,
+      reviewCaseId: records[0].id,
+      status: 'stored',
+    });
+    partial.status = 'receiving';
+    partial.files.push({
+      ...partial.files[0],
+      uploadId: crypto.randomUUID(),
+      sourceFileId: crypto.randomUUID(),
+      sourceVersionId: crypto.randomUUID(),
+      filename: '외부산출서.csv',
+      status: 'upload_pending',
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects') return jsonResponse([project]);
+        if (url.endsWith('/cases')) return jsonResponse(records);
+        if (url.includes(records[0].id)) return jsonResponse([partial]);
+        if (url.includes(records[1].id)) return jsonResponse([]);
+        throw new Error(`Unexpected request: ${url}`);
+      });
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /팀 기록 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '마감팀' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
+    const history = screen.getByRole('combobox', { name: '이전 자료 기록' });
+    expect(within(history).getAllByRole('option')).toHaveLength(2);
+    expect(
+      await screen.findByText('저장된 자료로 다음 단계 진행 가능'),
+    ).toBeVisible();
+    const workflow = screen.getByRole('region', { name: '검수 진행 단계' });
+    expect(
+      within(workflow).getByRole('button', { name: /STEP 2 · AI 검수/u }),
+    ).toBeEnabled();
+    fireEvent.change(history, { target: { value: records[1].id } });
+    await waitFor(() =>
+      expect(
+        screen.queryByText('저장된 자료로 다음 단계 진행 가능'),
+      ).toBeNull(),
+    );
+    expect(
+      within(workflow).getByRole('button', { name: /STEP 2 · AI 검수/u }),
+    ).toBeDisabled();
+    expect(
+      fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(0);
+  });
+
+  it('asks once before switching to a new team and preserves selection if creation fails', async () => {
+    const project = projectFixture('P100', '팀 전환 프로젝트');
+    const initialCase = caseFixture(project.id, '마감팀 자료');
+    const newCase = {
+      ...caseFixture(project.id, '구조팀 자료'),
+      discipline: 'RC' as const,
+    };
+    let failCreation = true;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url.endsWith('/cases') && init?.method === 'POST') {
+        if (failCreation)
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 'TEST_ERROR',
+                message: '팀 생성 실패',
+                requestId: 'test',
+              },
+            }),
+            { status: 500 },
+          );
+        return jsonResponse(newCase, 201);
+      }
+      if (url.endsWith('/cases')) return jsonResponse([initialCase]);
+      return jsonResponse([]);
+    });
+    renderStudio();
+    const row = await screen.findByRole('row', { name: /팀 전환 프로젝트/u });
+    fireEvent.click(
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '마감팀' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
+    fireEvent.change(document.querySelector('#source-files')!, {
+      target: {
+        files: [new File(['sample'], '미저장자료.csv', { type: 'text/csv' })],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '구조팀' }));
+    await screen.findByText('팀 생성 실패');
+    expect(
+      screen.getByText('미저장자료.csv', {
+        selector: '.source-file-list span',
+      }),
+    ).toBeVisible();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    failCreation = false;
+    confirm.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '구조팀' }));
+    expect(await screen.findByText('구조팀 자료')).toBeVisible();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.source-file-list')).toBeNull();
+    expect(screen.getByText('산출서와 집계표 원본 등록')).toBeVisible();
   });
 
   it('stores source files, verifies the persisted package, and keeps the exact result visible', async () => {
@@ -263,7 +392,7 @@ describe('ReviewStudio', () => {
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     const registerButton = await screen.findByRole('button', {
-      name: '산출서와 집계표 등록',
+      name: '마감팀',
     });
     fireEvent.click(registerButton);
     expect(
@@ -355,9 +484,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    fireEvent.click(
-      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
     await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
     const file = new File(['a,b\nc,1\n'], '내부산출서.csv', {
       type: 'text/csv',
@@ -423,9 +550,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    fireEvent.click(
-      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
     const packageList = await screen.findByRole('list', {
       name: /웹 검수 프로젝트 산출서와 집계표/u,
     });
@@ -548,9 +673,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    fireEvent.click(
-      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
     await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
     const files = [
       new File(['xlsx'], '가설산출서.xlsx', {
@@ -607,9 +730,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
-    fireEvent.click(
-      await screen.findByRole('button', { name: '산출서와 집계표 등록' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
     await screen.findByText('원본 저장 완료');
     fireEvent.click(
       screen.getByRole('button', { name: /STEP 3 · 수량산출 분석표/u }),
@@ -674,6 +795,10 @@ describe('ReviewStudio', () => {
         }),
       ),
     );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '마감팀' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마감팀' }));
     expect(await screen.findByText('P2 케이스')).toBeVisible();
     resolveP1?.(
       new Response(
