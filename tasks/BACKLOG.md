@@ -1,5 +1,14 @@
 # Implementation Backlog
 
+## 2026-09-07 delivery slice (current)
+
+- IMPLEMENTED: FIN source preview + confirmed mapping; versioned conditions/exceptions; arithmetic/decimal/range/summary-code candidates; frozen R2 evidence and D1 decisions; connected light workstation.
+- VERIFIED: pure/parser/SQLite guards; standard check/build, clean D1 migration, production dependency audit; real local browser source→trial→formal→decision→reload; authenticated XLSX response. Four-viewport regression: 9 passed, 3 intentional mobile-only skips.
+- RELEASE: Owner-private pilot publishing requested by user; deployment result is verified separately from local checks. Evidence and limits: `docs/CONCOST_QC_RELEASE_2026-09-07.md`.
+- TODO / needs-domain-validation: actual FIN variable/formula-code resolution, merged hierarchical context, 20-rule coverage, configurable reference information, Gemini semantic/typo/multilingual candidates, cross-file quantities, revision matching, large-input async execution, final report approval and RC/masonry.
+
+These slice statuses do not mark every historical acceptance item below complete.
+
 Statuses: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 
 Completion requires code, tests, acceptance evidence and updated docs—not implementation alone.

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 
 const stateDir = mkdtempSync(join(tmpdir(), 'fin-rc-d1-'));
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js');
@@ -61,6 +61,11 @@ try {
     );
   }
   const second = run(baseArgs);
+  if (!first.includes('0005_fin_review_workstation.sql'))
+    throw new Error('review workstation migration was not applied');
+  if (!first.includes('0004_source_package_replacement.sql')) {
+    throw new Error('replacement migration was not applied');
+  }
   if (!second.includes('No migrations to apply')) {
     throw new Error('second migration run was not idempotent');
   }
@@ -101,7 +106,7 @@ try {
     [
       ...executeBase,
       '--command',
-      "INSERT INTO source_package VALUES ('pkg-bad','p1','c2','mixed','draft','pending','HR-1','idem-bad','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'u1',1);",
+      "INSERT INTO source_package (id,project_id,review_case_id,display_name,status,project_identity_status,hard_rule_version,idempotency_key,request_hash,version,created_by,created_at) VALUES ('pkg-bad','p1','c2','mixed','draft','pending','HR-1','idem-bad','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'u1',1);",
     ],
     'cross-project case/package relation was accepted',
   );
@@ -109,7 +114,7 @@ try {
   run([
     ...executeBase,
     '--command',
-    "INSERT INTO source_package VALUES ('pkg1','p1','c1','pkg','draft','pending','HR-1','idem-1','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'u1',1); INSERT INTO source_file VALUES ('f1','pkg1','p1','c1','quantity_source','takeoff','산출서.xlsx','active','u1',1);",
+    "INSERT INTO source_package (id,project_id,review_case_id,display_name,status,project_identity_status,hard_rule_version,idempotency_key,request_hash,version,created_by,created_at) VALUES ('pkg1','p1','c1','pkg','draft','pending','HR-1','idem-1','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'u1',1); INSERT INTO source_file VALUES ('f1','pkg1','p1','c1','quantity_source','takeoff','산출서.xlsx','active','u1',1);",
   ]);
   expectFailure(
     [
@@ -123,5 +128,17 @@ try {
     'clean migration + idempotency + ingestion scope/invariant verification: PASS\n',
   );
 } finally {
-  rmSync(stateDir, { recursive: true, force: true });
+  const target = relative(resolve(tmpdir()), resolve(stateDir));
+  if (
+    !target.startsWith('fin-rc-d1-') ||
+    target.includes('..') ||
+    isAbsolute(target)
+  ) {
+    console.error(
+      'Refusing cleanup outside the generated migration-test directory',
+    );
+    process.exitCode = 1;
+  } else {
+    rmSync(stateDir, { recursive: true, force: true });
+  }
 }

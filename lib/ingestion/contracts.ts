@@ -10,8 +10,18 @@ export const idempotencyKeySchema = z
   .max(128)
   .regex(/^[A-Za-z0-9._:-]+$/u);
 
+export const replacementTargetsSchema = z
+  .array(z.object({ id: z.uuid(), version: z.number().int().min(1) }))
+  .min(1)
+  .max(32)
+  .refine(
+    (items) => new Set(items.map((item) => item.id)).size === items.length,
+    '교체할 자료 묶음이 중복되었습니다.',
+  );
+
 export const createSourcePackageSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
+  replaces: replacementTargetsSchema.optional(),
   files: z
     .array(
       z.object({
@@ -75,4 +85,7 @@ export type SourcePackageSummary = {
   projectIdentityStatus: 'pending' | 'matched' | 'unknown' | 'conflict';
   files: SourceUploadIntentSummary[];
   createdAt: string;
+  replaces?: Array<{ id: string; version: number }>;
+  replacementAppliedAt?: string | null;
+  supersededBy?: string | null;
 };

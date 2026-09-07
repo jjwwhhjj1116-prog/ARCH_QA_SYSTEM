@@ -36,6 +36,22 @@ export async function DELETE(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  return mutate(request, context, 'archive');
+}
+
+// Applies an already-stored replacement; does not accept file bytes or new targets.
+export async function POST(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  return mutate(request, context, 'applyReplacement');
+}
+
+async function mutate(
+  request: Request,
+  context: RouteContext,
+  action: 'archive' | 'applyReplacement',
+) {
   const requestId = requestIdFrom(request.headers);
   try {
     assertSameSiteMutation(request.headers);
@@ -49,7 +65,7 @@ export async function DELETE(
     const actor = actorFromHeaders(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
-    const data = await service.archive(
+    const data = await service[action](
       projectId,
       caseId,
       packageId,
@@ -70,7 +86,7 @@ export async function DELETE(
 function failure(error: unknown, requestId: string): Response {
   let status = 500;
   let code = 'INTERNAL_ERROR';
-  let message = '등록 자료 묶음을 삭제하지 못했습니다.';
+  let message = '등록 자료 변경을 완료하지 못했습니다.';
   let details: unknown;
   if (error instanceof AuthenticationError) {
     status = error.status;
@@ -87,7 +103,7 @@ function failure(error: unknown, requestId: string): Response {
   } else if (error instanceof ZodError) {
     status = 400;
     code = 'INVALID_INPUT';
-    message = '삭제할 등록 자료 묶음 정보를 확인해 주세요.';
+    message = '변경할 등록 자료 묶음 정보를 확인해 주세요.';
     details = z.treeifyError(error);
   } else if (error instanceof RequestBoundaryError) {
     status = error.status;

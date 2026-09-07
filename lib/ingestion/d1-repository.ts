@@ -7,7 +7,10 @@ import type {
   SourcePackageSummary,
   SourceUploadIntentSummary,
 } from './contracts';
-import { INGESTION_HARD_RULE_VERSION } from './contracts';
+import {
+  INGESTION_HARD_RULE_VERSION,
+  replacementTargetsSchema,
+} from './contracts';
 import type {
   ArchivedSourcePackageSummary,
   ArchiveSourcePackageRecord,
@@ -33,6 +36,9 @@ type ExistingPackageRow = {
   project_identity_status: SourcePackageSummary['projectIdentityStatus'];
   version: number;
   created_at: number;
+  replacement_targets_json: string | null;
+  replacement_applied_at: number | null;
+  superseded_by: string | null;
 };
 
 type ExistingFileRow = {
@@ -86,6 +92,17 @@ const uploadRoles = rolesForAction('source:upload');
 const rolePlaceholders = uploadRoles.map(() => '?').join(',');
 const UPLOAD_CLAIM_LEASE_MS = 5 * 60 * 1_000;
 
+// ponytail: bounded upload histories use JSON targets; index a relation table if
+// large case histories make this membership lookup measurable.
+function supersededBySql(alias: 'sp' | 'old') {
+  return `(SELECT replacement.id FROM source_package replacement,
+    json_each(replacement.replacement_targets_json) target
+    WHERE replacement.project_id = ${alias}.project_id
+      AND replacement.review_case_id = ${alias}.review_case_id
+      AND replacement.replacement_applied_at IS NOT NULL
+      AND json_extract(target.value, '$.id') = ${alias}.id LIMIT 1)`;
+}
+
 export class D1SourcePackageRepository
   implements SourcePackageRepository, SourceUploadRepository
 {
@@ -107,7 +124,9 @@ export class D1SourcePackageRepository
       binding
         .prepare(
           `SELECT sp.id, sp.project_id, sp.review_case_id, sp.display_name,
-                  sp.status, sp.project_identity_status, sp.version, sp.created_at
+                  sp.status, sp.project_identity_status, sp.version, sp.created_at,
+                  sp.replacement_targets_json, sp.replacement_applied_at,
+                  ${supersededBySql('sp')} AS superseded_by
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN project p ON p.id = sp.project_id
@@ -177,8 +196,112 @@ export class D1SourcePackageRepository
         projectIdentityStatus: row.project_identity_status,
         files: filesByPackage.get(row.id) ?? [],
         createdAt: new Date(row.created_at).toISOString(),
+        ...replacementSummary(row),
       }),
     );
+  }
+
+  async applyReplacement(
+    record: ArchiveSourcePackageRecord,
+  ): Promise<{ id: string; applied: true }> {
+    const binding = getD1Binding();
+    const scope = [
+      record.packageId,
+      record.projectId,
+      record.reviewCaseId,
+      record.actor.id,
+    ];
+    const readAuthorized = () =>
+      binding
+        .prepare(
+          `SELECT sp.replacement_applied_at FROM source_package sp
+       JOIN review_case rc ON rc.id = sp.review_case_id AND rc.project_id = sp.project_id
+       JOIN project p ON p.id = sp.project_id
+       JOIN project_member pm ON pm.project_id = sp.project_id
+       WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ? AND pm.user_id = ?
+         AND p.status = 'active' AND rc.status <> 'archived'
+         AND pm.role IN (${rolePlaceholders})
+         AND (sp.created_by = pm.user_id OR pm.role IN ('workspace_admin','project_owner'))`,
+        )
+        .bind(...scope, ...uploadRoles)
+        .first<{ replacement_applied_at: number | null }>();
+    const existing = await readAuthorized();
+    if (!existing)
+      throw new SourcePackageAccessError('이 자료를 교체할 권한이 없습니다.');
+    if (existing.replacement_applied_at !== null)
+      return { id: record.packageId, applied: true };
+
+    const markerId = crypto.randomUUID();
+    const appliedAt = record.archivedAt.getTime();
+    // Both statements commit together; a failed predicate creates no marker and
+    // cannot activate any subset. JS checks alone cannot roll back a D1 batch.
+    const results = await binding.batch([
+      binding
+        .prepare(
+          `INSERT INTO audit_event
+           (id, project_id, actor_id, action, target_type, target_id, payload_json, request_id, created_at)
+         SELECT ?, sp.project_id, pm.user_id, 'source_package.replaced', 'source_package', sp.id,
+                json_object('replaces', json(sp.replacement_targets_json), 'retainedForAudit', json('true')), ?, ?
+         FROM source_package sp
+         JOIN review_case rc ON rc.id = sp.review_case_id AND rc.project_id = sp.project_id
+         JOIN project p ON p.id = sp.project_id
+         JOIN project_member pm ON pm.project_id = sp.project_id
+         WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ? AND pm.user_id = ?
+           AND pm.role IN (${rolePlaceholders})
+           AND (sp.created_by = pm.user_id OR pm.role IN ('workspace_admin','project_owner'))
+           AND p.status = 'active' AND rc.status <> 'archived' AND sp.version = ?
+           AND sp.status IN ('stored_unverified','identity_matched')
+           AND sp.project_identity_status <> 'conflict'
+           AND sp.replacement_applied_at IS NULL
+           AND json_array_length(sp.replacement_targets_json) BETWEEN 1 AND 32
+           AND ${supersededBySql('sp')} IS NULL
+           AND EXISTS (SELECT 1 FROM source_file_version sfv WHERE sfv.package_id = sp.id)
+           AND NOT EXISTS (SELECT 1 FROM source_file_version sfv WHERE sfv.package_id = sp.id
+             AND (sfv.status <> 'stored' OR NOT EXISTS (
+               SELECT 1 FROM upload_attempt ua WHERE ua.source_file_version_id = sfv.id AND ua.state = 'finalized')))
+           AND NOT EXISTS (SELECT 1 FROM upload_attempt ua WHERE ua.package_id = sp.id AND ua.state <> 'finalized')
+           AND (SELECT COUNT(*) FROM json_each(sp.replacement_targets_json) target
+             JOIN source_package old ON old.id = json_extract(target.value, '$.id')
+             WHERE old.project_id = sp.project_id AND old.review_case_id = sp.review_case_id
+               AND old.id <> sp.id AND old.version = json_extract(target.value, '$.version')
+               AND old.status <> 'aborted' AND ${supersededBySql('old')} IS NULL
+               AND (old.replacement_targets_json IS NULL OR old.replacement_applied_at IS NOT NULL)
+               AND (old.created_by = pm.user_id OR pm.role IN ('workspace_admin','project_owner'))
+               AND NOT EXISTS (SELECT 1 FROM upload_attempt active WHERE active.package_id = old.id
+                 AND active.state IN ('uploading','uploaded','finalizing'))
+           ) = json_array_length(sp.replacement_targets_json)`,
+        )
+        .bind(
+          markerId,
+          record.requestId,
+          appliedAt,
+          ...scope,
+          ...uploadRoles,
+          record.expectedVersion,
+        ),
+      binding
+        .prepare(
+          `UPDATE source_package SET replacement_applied_at = ?, version = version + 1
+         WHERE id = ? AND project_id = ? AND review_case_id = ? AND replacement_applied_at IS NULL
+           AND EXISTS (SELECT 1 FROM audit_event WHERE id = ? AND target_id = source_package.id
+             AND project_id = source_package.project_id AND action = 'source_package.replaced')`,
+        )
+        .bind(
+          appliedAt,
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          markerId,
+        ),
+    ]);
+    if (results[0].meta.changes !== 1 || results[1].meta.changes !== 1) {
+      if ((await readAuthorized())?.replacement_applied_at != null)
+        return { id: record.packageId, applied: true };
+      throw new SourcePackageConflictError(
+        '교체를 적용하지 못했습니다. 모든 파일의 저장 완료와 기존 자료 변경 여부를 확인하세요. 기존 자료는 유지됩니다.',
+      );
+    }
+    return { id: record.packageId, applied: true };
   }
 
   async archive(
@@ -188,6 +311,7 @@ export class D1SourcePackageRepository
     const row = await binding
       .prepare(
         `SELECT sp.status, sp.version, sp.created_by, pm.role,
+                sp.replacement_targets_json, sp.replacement_applied_at,
                 (SELECT COUNT(*) FROM upload_attempt active_attempt
                  WHERE active_attempt.package_id = sp.id
                    AND active_attempt.state IN ('uploading','uploaded','finalizing')) AS active_upload_count,
@@ -219,6 +343,8 @@ export class D1SourcePackageRepository
         active_upload_count: number;
         stored_file_count: number;
         file_count: number;
+        replacement_targets_json: string | null;
+        replacement_applied_at: number | null;
       }>();
     if (!row) {
       throw new SourcePackageAccessError(
@@ -227,7 +353,10 @@ export class D1SourcePackageRepository
     }
     const canArchiveAny =
       row.role === 'workspace_admin' || row.role === 'project_owner';
-    if (!canArchiveAny && row.created_by !== record.actor.id) {
+    if (
+      !uploadRoles.includes(row.role as (typeof uploadRoles)[number]) ||
+      (!canArchiveAny && row.created_by !== record.actor.id)
+    ) {
       throw new SourcePackageAccessError(
         '다른 사용자가 등록한 자료 묶음을 삭제할 권한이 없습니다.',
       );
@@ -245,7 +374,12 @@ export class D1SourcePackageRepository
         '등록 자료 상태가 변경되었습니다. 저장 내역을 새로고침해 주세요.',
       );
     }
-    if (!['draft', 'receiving', 'blocked', 'rejected'].includes(row.status)) {
+    const pendingReplacement =
+      row.replacement_targets_json && row.replacement_applied_at === null;
+    if (
+      !pendingReplacement &&
+      !['draft', 'receiving', 'blocked', 'rejected'].includes(row.status)
+    ) {
       throw new SourcePackageConflictError(
         '저장이 완료된 자료 묶음은 이 화면에서 삭제할 수 없습니다.',
       );
@@ -256,24 +390,58 @@ export class D1SourcePackageRepository
       );
     }
     const archivedAt = record.archivedAt.getTime();
+    const archiveMarker = crypto.randomUUID();
     const results = await binding.batch([
+      binding
+        .prepare(`INSERT INTO audit_event
+        (id, project_id, actor_id, action, target_type, target_id, payload_json, request_id, created_at)
+        SELECT ?, sp.project_id, ?, 'source_package.aborted', 'source_package', sp.id, ?, ?, ?
+        FROM source_package sp
+        INNER JOIN review_case rc ON rc.id = sp.review_case_id AND rc.project_id = sp.project_id
+        INNER JOIN project p ON p.id = sp.project_id
+        INNER JOIN project_member pm ON pm.project_id = sp.project_id AND pm.user_id = ?
+        WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ? AND sp.version = ?
+          AND p.status = 'active' AND rc.status <> 'archived'
+          AND pm.role IN (${uploadRoles.map(() => '?').join(',')})
+          AND (sp.created_by = ? OR pm.role IN ('workspace_admin','project_owner'))
+          AND (sp.status IN ('draft','receiving','blocked','rejected')
+            OR (sp.status <> 'aborted' AND sp.replacement_targets_json IS NOT NULL AND sp.replacement_applied_at IS NULL))
+          AND NOT EXISTS (SELECT 1 FROM upload_attempt active_attempt WHERE active_attempt.package_id = sp.id
+            AND active_attempt.state IN ('uploading','uploaded','finalizing'))`)
+        .bind(
+          archiveMarker,
+          record.actor.id,
+          JSON.stringify({
+            previousStatus: row.status,
+            fileCount: row.file_count,
+            storedFileCount: row.stored_file_count,
+            deletionMode: 'soft_abort',
+          }),
+          record.requestId,
+          archivedAt,
+          record.actor.id,
+          record.packageId,
+          record.projectId,
+          record.reviewCaseId,
+          record.expectedVersion,
+          ...uploadRoles,
+          record.actor.id,
+        ),
       binding
         .prepare(
           `UPDATE source_package
            SET status = 'aborted', version = version + 1
            WHERE id = ? AND project_id = ? AND review_case_id = ?
-             AND version = ? AND status IN ('draft','receiving','blocked','rejected')
-             AND NOT EXISTS (
-               SELECT 1 FROM upload_attempt active_attempt
-               WHERE active_attempt.package_id = source_package.id
-                 AND active_attempt.state IN ('uploading','uploaded','finalizing')
-             )`,
+             AND version = ? AND (status IN ('draft','receiving','blocked','rejected')
+               OR (replacement_targets_json IS NOT NULL AND replacement_applied_at IS NULL))
+             AND EXISTS (SELECT 1 FROM audit_event WHERE id = ? AND target_id = source_package.id)`,
         )
         .bind(
           record.packageId,
           record.projectId,
           record.reviewCaseId,
           record.expectedVersion,
+          archiveMarker,
         ),
       binding
         .prepare(
@@ -285,7 +453,7 @@ export class D1SourcePackageRepository
              AND EXISTS (
                SELECT 1 FROM source_package sp
                WHERE sp.id = upload_attempt.package_id AND sp.status = 'aborted'
-                 AND sp.version = ?
+                 AND sp.version = ? AND EXISTS (SELECT 1 FROM audit_event WHERE id = ? AND target_id = sp.id)
              )`,
         )
         .bind(
@@ -294,6 +462,7 @@ export class D1SourcePackageRepository
           record.projectId,
           record.reviewCaseId,
           record.expectedVersion + 1,
+          archiveMarker,
         ),
       binding
         .prepare(
@@ -304,7 +473,7 @@ export class D1SourcePackageRepository
              AND EXISTS (
                SELECT 1 FROM source_package sp
                WHERE sp.id = source_file.package_id AND sp.status = 'aborted'
-                 AND sp.version = ?
+                 AND sp.version = ? AND EXISTS (SELECT 1 FROM audit_event WHERE id = ? AND target_id = sp.id)
              )`,
         )
         .bind(
@@ -312,36 +481,10 @@ export class D1SourcePackageRepository
           record.projectId,
           record.reviewCaseId,
           record.expectedVersion + 1,
-        ),
-      binding
-        .prepare(
-          `INSERT INTO audit_event
-             (id, project_id, actor_id, action, target_type, target_id,
-              payload_json, request_id, created_at)
-           SELECT ?, sp.project_id, ?, 'source_package.aborted',
-                  'source_package', sp.id, ?, ?, ?
-           FROM source_package sp
-           WHERE sp.id = ? AND sp.project_id = ? AND sp.review_case_id = ?
-             AND sp.status = 'aborted' AND sp.version = ?`,
-        )
-        .bind(
-          crypto.randomUUID(),
-          record.actor.id,
-          JSON.stringify({
-            previousStatus: row.status,
-            fileCount: row.file_count,
-            storedFileCount: row.stored_file_count,
-            deletionMode: 'soft_abort',
-          }),
-          record.requestId,
-          archivedAt,
-          record.packageId,
-          record.projectId,
-          record.reviewCaseId,
-          record.expectedVersion + 1,
+          archiveMarker,
         ),
     ]);
-    if (results[0].meta.changes !== 1 || results[3].meta.changes !== 1) {
+    if (results[0].meta.changes !== 1 || results[1].meta.changes !== 1) {
       throw new SourcePackageConflictError(
         '등록 자료 상태가 변경되었습니다. 저장 내역을 새로고침해 주세요.',
       );
@@ -358,6 +501,29 @@ export class D1SourcePackageRepository
     const existing = await this.loadExisting(record);
     if (existing) return existing;
 
+    if (record.replaces) {
+      const current = await this.listForActor(
+        record.projectId,
+        record.reviewCaseId,
+        record.actor.id,
+      );
+      if (
+        !record.replaces.every((target) =>
+          current.some(
+            (item) =>
+              item.id === target.id &&
+              item.version === target.version &&
+              !item.supersededBy &&
+              !(item.replaces?.length && !item.replacementAppliedAt),
+          ),
+        )
+      ) {
+        throw new SourcePackageConflictError(
+          '교체 대상이 변경되었습니다. 저장 내역을 새로고침한 뒤 다시 선택하세요.',
+        );
+      }
+    }
+
     const binding = getD1Binding();
     const createdAt = record.createdAt.getTime();
     const statements: D1PreparedStatement[] = [
@@ -365,8 +531,9 @@ export class D1SourcePackageRepository
         .prepare(
           `INSERT INTO source_package
              (id, project_id, review_case_id, display_name, status, project_identity_status,
-              hard_rule_version, idempotency_key, request_hash, version, created_by, created_at)
-           SELECT ?, ?, ?, ?, 'receiving', 'pending', ?, ?, ?, 1, ?, ?
+              hard_rule_version, idempotency_key, request_hash, version, created_by, created_at,
+              replacement_targets_json)
+           SELECT ?, ?, ?, ?, 'receiving', 'pending', ?, ?, ?, 1, ?, ?, ?
            FROM review_case rc
            INNER JOIN project p ON p.id = rc.project_id
            INNER JOIN project_member pm ON pm.project_id = rc.project_id
@@ -384,6 +551,7 @@ export class D1SourcePackageRepository
           record.requestHash,
           record.actor.id,
           createdAt,
+          record.replaces ? JSON.stringify(record.replaces) : null,
           record.reviewCaseId,
           record.projectId,
           record.actor.id,
@@ -543,6 +711,7 @@ export class D1SourcePackageRepository
            AND pm.role IN (${rolePlaceholders})
            AND p.status = 'active' AND rc.status <> 'archived'
            AND sp.status NOT IN ('blocked','rejected','aborted')
+           AND ${supersededBySql('sp')} IS NULL
            AND sfv.package_id = ua.package_id
            AND sfv.project_id = ua.project_id
            AND sfv.review_case_id = ua.review_case_id
@@ -597,6 +766,7 @@ export class D1SourcePackageRepository
                AND sp.project_id = upload_attempt.project_id
                AND sp.review_case_id = upload_attempt.review_case_id
                AND sp.status <> 'aborted'
+               AND ${supersededBySql('sp')} IS NULL
            )`,
       )
       .bind(requestId, now, uploadId, raw.version, now - UPLOAD_CLAIM_LEASE_MS)
@@ -899,7 +1069,9 @@ export class D1SourcePackageRepository
       binding
         .prepare(
           `SELECT sp.id, sp.project_id, sp.review_case_id, sp.display_name,
-                  sp.request_hash, sp.status, sp.project_identity_status, sp.version, sp.created_at
+                  sp.request_hash, sp.status, sp.project_identity_status, sp.version, sp.created_at,
+                  sp.replacement_targets_json, sp.replacement_applied_at,
+                  ${supersededBySql('sp')} AS superseded_by
            FROM source_package sp
            INNER JOIN review_case rc ON rc.id = sp.review_case_id
            INNER JOIN project p ON p.id = sp.project_id
@@ -971,6 +1143,7 @@ export class D1SourcePackageRepository
       projectIdentityStatus: packageRow.project_identity_status,
       files: files.map(fileSummary),
       createdAt: new Date(packageRow.created_at).toISOString(),
+      ...replacementSummary(packageRow),
     };
   }
 }
@@ -1045,6 +1218,9 @@ function summaryFromRecord(
       errorCode: null,
     })),
     createdAt: record.createdAt.toISOString(),
+    ...(record.replaces
+      ? { replaces: record.replaces, replacementAppliedAt: null }
+      : {}),
   };
 }
 
@@ -1060,5 +1236,23 @@ function fileSummary(row: ExistingFileRow): SourceUploadIntentSummary {
     status: row.status,
     uploadState: row.upload_state,
     errorCode: row.error_code,
+  };
+}
+
+function replacementSummary(
+  row: Pick<
+    ExistingPackageRow,
+    'replacement_targets_json' | 'replacement_applied_at' | 'superseded_by'
+  >,
+) {
+  return {
+    replaces: row.replacement_targets_json
+      ? replacementTargetsSchema.parse(JSON.parse(row.replacement_targets_json))
+      : undefined,
+    replacementAppliedAt:
+      row.replacement_applied_at == null
+        ? null
+        : new Date(row.replacement_applied_at).toISOString(),
+    supersededBy: row.superseded_by ?? null,
   };
 }

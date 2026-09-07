@@ -12,7 +12,10 @@ import {
 import type { SyntheticEvent } from 'react';
 import type { ProjectSummary, ReviewCaseSummary } from '@/lib/domain/contracts';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
-import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
+import {
+  hasUsableStoredSources,
+  isPendingReplacement,
+} from '@/lib/ingestion/document-checklist';
 import { SourceDocumentChecklist } from './source-document-checklist';
 import { StageHeading } from './project-registration-workspace';
 
@@ -24,6 +27,9 @@ type Props = {
   caseSubmitting: boolean;
   uploadCaseId: string | null;
   sourceFiles: File[];
+  uploadMode: 'append' | 'replace';
+  onUploadModeChange: (mode: 'append' | 'replace') => void;
+  onApplyReplacement: (sourcePackage: SourcePackageSummary) => void;
   uploading: boolean;
   uploadProgress: string;
   uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
@@ -60,6 +66,9 @@ export function ProjectDataWorkspace({
   caseSubmitting,
   uploadCaseId,
   sourceFiles,
+  uploadMode,
+  onUploadModeChange,
+  onApplyReplacement,
   uploading,
   uploadProgress,
   uploadStatus,
@@ -88,16 +97,28 @@ export function ProjectDataWorkspace({
       item.discipline === activeCase?.discipline && item.status !== 'archived',
   );
   const hasStoredSources = sourcePackages.some(hasUsableStoredSources);
-  const continueToAiReviewAction = hasStoredSources ? (
+  const currentPackages = sourcePackages.filter((item) => !item.supersededBy);
+  const previousPackages = sourcePackages.filter((item) => item.supersededBy);
+  const replacementTargets = currentPackages.filter(
+    (item) => !isPendingReplacement(item),
+  );
+  const continueToAiReviewAction = (
     <button
       className="next-step-action"
       type="button"
-      disabled={uploading || sourcePackageState !== 'ready'}
+      disabled={
+        !hasStoredSources || uploading || sourcePackageState !== 'ready'
+      }
+      title={
+        !hasStoredSources
+          ? '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.'
+          : undefined
+      }
       onClick={onContinueToAiReview}
     >
       STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
     </button>
-  ) : null;
+  );
   return (
     <section
       className="project-workspace stage-workspace"
@@ -243,6 +264,39 @@ export function ProjectDataWorkspace({
 
             {uploadCaseId && (
               <form className="source-upload-panel" onSubmit={onUpload}>
+                <fieldset
+                  className="next-step-panel"
+                  aria-label="자료 등록 상단 작업"
+                >
+                  <span className="next-step-check" aria-hidden="true">
+                    {hasStoredSources ? <Check /> : <ArrowRight />}
+                  </span>
+                  <div>
+                    <h5>
+                      {hasStoredSources
+                        ? '저장된 자료로 AI 검수 단계로 이동하세요.'
+                        : '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.'}
+                    </h5>
+                    <p>
+                      저장에 실패했거나 미등록인 자료는 제외하고 진행합니다.
+                      검수 전 입력 매핑이 필요하며, 근거가 없는 항목은 미평가로
+                      표시합니다.
+                    </p>
+                  </div>
+                  {continueToAiReviewAction}
+                  <button
+                    className="primary-action"
+                    type="submit"
+                    disabled={
+                      uploading ||
+                      sourceFiles.length === 0 ||
+                      sourcePackageState !== 'ready'
+                    }
+                  >
+                    <Upload aria-hidden="true" />
+                    {uploading ? '원본 저장 중' : '선택 파일 저장'}
+                  </button>
+                </fieldset>
                 <div className="source-upload-heading">
                   <div>
                     <span className="selection-label">프로젝트 자료</span>
@@ -251,22 +305,78 @@ export function ProjectDataWorkspace({
                       XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다.
                     </p>
                   </div>
-                  <fieldset
-                    className="source-upload-heading-actions"
-                    aria-label="자료 등록 상단 작업"
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="자료 등록 닫기"
+                    disabled={uploading}
+                    onClick={onCloseUpload}
                   >
-                    {continueToAiReviewAction}
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="자료 등록 닫기"
-                      disabled={uploading}
-                      onClick={onCloseUpload}
-                    >
-                      <X aria-hidden="true" />
-                    </button>
-                  </fieldset>
+                    <X aria-hidden="true" />
+                  </button>
                 </div>
+                <fieldset
+                  className="source-upload-mode"
+                  disabled={uploading || sourcePackageState !== 'ready'}
+                >
+                  <legend>자료 등록 방식</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="source-upload-mode"
+                      value="append"
+                      checked={uploadMode === 'append'}
+                      onChange={() => onUploadModeChange('append')}
+                    />
+                    추가 등록
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="source-upload-mode"
+                      value="replace"
+                      disabled={replacementTargets.length === 0}
+                      checked={uploadMode === 'replace'}
+                      onChange={() => onUploadModeChange('replace')}
+                    />
+                    기존 자료 교체
+                  </label>
+                  <p>
+                    {uploadMode === 'replace'
+                      ? `현재 자료 기록의 기존 ${replacementTargets.length}묶음을 새 파일로 교체합니다. 새 파일이 모두 저장되기 전까지 기존 자료는 유지됩니다.`
+                      : '기존 자료를 유지하고 선택한 파일을 추가합니다.'}
+                  </p>
+                  {uploadMode === 'replace' && (
+                    <details>
+                      <summary>
+                        교체 대상 확인 ·{' '}
+                        {replacementTargets.reduce(
+                          (count, item) => count + item.files.length,
+                          0,
+                        )}
+                        개 파일
+                      </summary>
+                      <ul>
+                        {replacementTargets.map((item) => (
+                          <li key={item.id}>
+                            {item.displayName} · {item.id.slice(0, 8)}
+                            <ul>
+                              {item.files.map((file) => (
+                                <li key={file.sourceVersionId}>
+                                  {file.filename}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                      <p>
+                        다른 팀·이전 자료 기록은 변경하지 않습니다. 교체 후 이전
+                        원본은 이력으로 보관합니다.
+                      </p>
+                    </details>
+                  )}
+                </fieldset>
                 <label className="source-file-picker">
                   <Upload aria-hidden="true" />
                   <span>
@@ -278,7 +388,6 @@ export function ProjectDataWorkspace({
                     type="file"
                     accept=".xlsx,.csv"
                     multiple
-                    required
                     disabled={uploading}
                     onChange={(event) =>
                       onFilesChange(Array.from(event.target.files ?? []))
@@ -355,7 +464,7 @@ export function ProjectDataWorkspace({
                       </h5>
                     </div>
                     {sourcePackageState === 'ready' && (
-                      <span>{sourcePackages.length}건</span>
+                      <span>{currentPackages.length}건</span>
                     )}
                   </div>
                   {sourcePackageState === 'loading' ? (
@@ -367,11 +476,11 @@ export function ProjectDataWorkspace({
                         저장 내역 다시 불러오기
                       </button>
                     </div>
-                  ) : sourcePackages.length === 0 ? (
+                  ) : currentPackages.length === 0 ? (
                     <p>이 팀에 저장된 산출서와 집계표가 아직 없습니다.</p>
                   ) : (
                     <ul className="source-package-list">
-                      {sourcePackages.map((sourcePackage) => {
+                      {currentPackages.map((sourcePackage) => {
                         const storedCount = sourcePackage.files.filter(
                           (file) => file.status === 'stored',
                         ).length;
@@ -380,9 +489,11 @@ export function ProjectDataWorkspace({
                             <div>
                               <strong>{sourcePackage.displayName}</strong>
                               <span
-                                className={`package-status ${packageStatusToneClass(sourcePackage.status)}`}
+                                className={`package-status ${isPendingReplacement(sourcePackage) ? 'is-pending' : packageStatusToneClass(sourcePackage.status)}`}
                               >
-                                {packageStatusLabel(sourcePackage.status)}
+                                {isPendingReplacement(sourcePackage)
+                                  ? '교체 대기 · 기존 자료 유지'
+                                  : packageStatusLabel(sourcePackage.status)}
                               </span>
                               <small>
                                 {storedCount}/{sourcePackage.files.length}개
@@ -392,6 +503,19 @@ export function ProjectDataWorkspace({
                                 {' · 묶음 '}
                                 {sourcePackage.id.slice(0, 8)}
                               </small>
+                              {isPendingReplacement(sourcePackage) &&
+                                storedCount === sourcePackage.files.length && (
+                                  <button
+                                    type="button"
+                                    className="secondary-action"
+                                    disabled={uploading || !canUpload}
+                                    onClick={() =>
+                                      onApplyReplacement(sourcePackage)
+                                    }
+                                  >
+                                    교체 적용
+                                  </button>
+                                )}
                               {canArchiveSourcePackage(sourcePackage) && (
                                 <button
                                   className="source-package-delete"
@@ -435,29 +559,28 @@ export function ProjectDataWorkspace({
                     </ul>
                   )}
                 </section>
-                {hasStoredSources && (
-                  <section
-                    className="next-step-panel"
-                    aria-labelledby="next-step-title"
-                  >
-                    <span className="next-step-check" aria-hidden="true">
-                      <Check />
-                    </span>
-                    <div>
-                      <span className="selection-label">
-                        저장된 자료로 다음 단계 진행 가능
-                      </span>
-                      <h5 id="next-step-title">
-                        저장된 자료로 AI 검수 단계로 이동하세요.
-                      </h5>
-                      <p>
-                        저장에 실패했거나 미등록인 자료는 제외하고 진행합니다.
-                        검수 전 입력 매핑이 필요하며, 근거가 없는 항목은
-                        미평가로 표시합니다.
-                      </p>
-                    </div>
-                    {continueToAiReviewAction}
-                  </section>
+                {previousPackages.length > 0 && (
+                  <details className="source-previous-history">
+                    <summary>
+                      교체된 이전 자료 · {previousPackages.length}묶음 (검수
+                      대상 제외)
+                    </summary>
+                    <ul>
+                      {previousPackages.map((item) => (
+                        <li key={item.id}>
+                          <strong>{item.displayName}</strong> ·{' '}
+                          {formatRegisteredAt(item.createdAt)}
+                          <ul>
+                            {item.files.map((file) => (
+                              <li key={file.sourceVersionId}>
+                                {file.filename}
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
                 <div className="form-actions">
                   <button
@@ -471,13 +594,19 @@ export function ProjectDataWorkspace({
                   <button
                     className="primary-action"
                     type="submit"
-                    disabled={uploading || sourceFiles.length === 0}
+                    disabled={
+                      uploading ||
+                      sourceFiles.length === 0 ||
+                      sourcePackageState !== 'ready'
+                    }
                   >
                     {uploading
                       ? `검사·저장 중 (${uploadCompletedCount}/${sourceFiles.length})`
-                      : uploadStatus === 'error'
-                        ? '원본 검사 후 다시 저장'
-                        : '원본 검사 후 저장'}
+                      : uploadMode === 'replace'
+                        ? '원본 검사 후 교체'
+                        : uploadStatus === 'error'
+                          ? '원본 검사 후 다시 저장'
+                          : '원본 검사 후 저장'}
                   </button>
                 </div>
               </form>
@@ -490,8 +619,9 @@ export function ProjectDataWorkspace({
 }
 
 function canArchiveSourcePackage(sourcePackage: SourcePackageSummary): boolean {
-  return ['draft', 'receiving', 'blocked', 'rejected'].includes(
-    sourcePackage.status,
+  return (
+    isPendingReplacement(sourcePackage) ||
+    ['draft', 'receiving', 'blocked', 'rejected'].includes(sourcePackage.status)
   );
 }
 

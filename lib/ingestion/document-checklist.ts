@@ -1,5 +1,13 @@
 import type { SourcePackageSummary } from './contracts';
 
+export function isPendingReplacement(
+  sourcePackage: SourcePackageSummary,
+): boolean {
+  return Boolean(
+    sourcePackage.replaces?.length && !sourcePackage.replacementAppliedAt,
+  );
+}
+
 export type DocumentRequirement = {
   id: string;
   label: string;
@@ -114,6 +122,8 @@ export function hasUsableStoredSources(
   sourcePackage: SourcePackageSummary,
 ): boolean {
   return (
+    !sourcePackage.supersededBy &&
+    !isPendingReplacement(sourcePackage) &&
     !['blocked', 'rejected', 'aborted'].includes(sourcePackage.status) &&
     sourcePackage.projectIdentityStatus !== 'conflict' &&
     sourcePackage.files.some((file) => file.status === 'stored')

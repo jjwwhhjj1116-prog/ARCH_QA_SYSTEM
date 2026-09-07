@@ -21,6 +21,7 @@ export type NewSourcePackageRecord = {
   idempotencyKey: string;
   requestHash: string;
   hardRuleVersion: string;
+  replaces?: Array<{ id: string; version: number }>;
   files: NewSourceUploadIntentRecord[];
   createdAt: Date;
   expiresAt: Date;
@@ -44,6 +45,9 @@ export type ArchivedSourcePackageSummary = {
 };
 
 export interface SourcePackageRepository {
+  applyReplacement(
+    record: ArchiveSourcePackageRecord,
+  ): Promise<{ id: string; applied: true }>;
   listForActor(
     projectId: string,
     reviewCaseId: string,

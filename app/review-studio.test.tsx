@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
+import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewStudio } from './review-studio';
 
@@ -381,7 +382,9 @@ describe('ReviewStudio', () => {
     const history = screen.getByRole('combobox', { name: '이전 자료 기록' });
     expect(within(history).getAllByRole('option')).toHaveLength(2);
     expect(
-      await screen.findByText('저장된 자료로 다음 단계 진행 가능'),
+      await screen.findByRole('heading', {
+        name: '저장된 자료로 AI 검수 단계로 이동하세요.',
+      }),
     ).toBeVisible();
     const workflow = screen.getByRole('region', { name: '검수 진행 단계' });
     expect(
@@ -461,7 +464,7 @@ describe('ReviewStudio', () => {
     expect(screen.getByText('산출서와 집계표 원본 등록')).toBeVisible();
   });
 
-  it('keeps both review shortcuts synchronized across stored, busy, loading, error, and empty states', () => {
+  it('places the only review shortcut before every upload control, including busy and empty states', () => {
     const project = projectFixture('P1', '상단 검수 버튼 확인');
     const reviewCase = caseFixture(project.id, '마감팀');
     const props = {
@@ -472,6 +475,9 @@ describe('ReviewStudio', () => {
       caseSubmitting: false,
       uploadCaseId: reviewCase.id,
       sourceFiles: [],
+      uploadMode: 'append',
+      onUploadModeChange: vi.fn(),
+      onApplyReplacement: vi.fn(),
       uploading: false,
       uploadProgress: '',
       uploadStatus: 'idle',
@@ -517,7 +523,23 @@ describe('ReviewStudio', () => {
       const actions = screen.getAllByRole('button', {
         name: /STEP 2 · AI 검수 시작/u,
       });
-      expect(actions).toHaveLength(2);
+      expect(actions).toHaveLength(1);
+      const topPanel = screen.getByRole('group', {
+        name: '자료 등록 상단 작업',
+      });
+      expect(
+        document.querySelector('.source-upload-panel')?.firstElementChild,
+      ).toBe(topPanel);
+      expect(
+        topPanel.compareDocumentPosition(
+          screen.getByLabelText(/산출서와 집계표 선택/u),
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        topPanel.compareDocumentPosition(
+          document.querySelector('.source-package-history')!,
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       for (const action of actions) {
         expect(action).toHaveAttribute('type', 'button');
         if (enabled) expect(action).toBeEnabled();
@@ -525,12 +547,15 @@ describe('ReviewStudio', () => {
         fireEvent.click(action);
       }
     }
-    expect(props.onContinueToAiReview).toHaveBeenCalledTimes(2);
+    expect(props.onContinueToAiReview).toHaveBeenCalledTimes(1);
     expect(props.onUpload).not.toHaveBeenCalled();
     rerender(<ProjectDataWorkspace {...props} sourcePackages={[]} />);
     expect(
       screen.queryAllByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+    ).toBeDisabled();
   });
 
   it('stores source files, verifies the persisted package, and keeps the exact result visible', async () => {
@@ -646,7 +671,7 @@ describe('ReviewStudio', () => {
     const continueActions = screen.getAllByRole('button', {
       name: /STEP 2 · AI 검수 시작/u,
     });
-    expect(continueActions).toHaveLength(2);
+    expect(continueActions).toHaveLength(1);
     for (const action of continueActions) {
       expect(action).toBeVisible();
       expect(action).toBeEnabled();
@@ -671,6 +696,146 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
     expect(packageListCalls).toBe(2);
   });
+
+  it.each([true, false])(
+    'confirms replacement once and activates only after every file is stored (success: %s)',
+    async (succeeds) => {
+      const project = projectFixture('TEST', '교체 테스트');
+      const reviewCase = caseFixture(project.id, '교체 테스트 마감팀');
+      const old = {
+        ...sourcePackageFixture({
+          projectId: project.id,
+          reviewCaseId: reviewCase.id,
+          status: 'stored',
+        }),
+        displayName: '이전 자료',
+      };
+      const targets = [{ id: old.id, version: old.version }];
+      const next: SourcePackageSummary = {
+        ...sourcePackageFixture({
+          projectId: project.id,
+          reviewCaseId: reviewCase.id,
+          packageId: crypto.randomUUID(),
+          status: 'upload_pending',
+        }),
+        displayName: '수정 자료',
+        replaces: targets,
+        replacementAppliedAt: null,
+      };
+      let created = false;
+      let stored = false;
+      let applied = false;
+      const base = `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`;
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input, init) => {
+          const url = requestUrl(input);
+          if (url === '/api/projects') return jsonResponse([project]);
+          if (url.endsWith('/cases')) return jsonResponse([reviewCase]);
+          if (url === base && init?.method === 'POST') {
+            expect(JSON.parse(init.body as string).replaces).toEqual(targets);
+            created = true;
+            return jsonResponse(next, 201);
+          }
+          if (url === base)
+            return jsonResponse([
+              { ...old, supersededBy: applied ? next.id : null },
+              ...(created
+                ? [
+                    {
+                      ...next,
+                      status: stored ? 'stored_unverified' : 'receiving',
+                      replacementAppliedAt: applied
+                        ? new Date().toISOString()
+                        : null,
+                      files: next.files.map((file) => ({
+                        ...file,
+                        status: stored ? 'stored' : 'upload_pending',
+                      })),
+                    },
+                  ]
+                : []),
+            ]);
+          if (url === `/api/uploads/${next.files[0].uploadId}/bytes`) {
+            stored = succeeds;
+            return succeeds
+              ? jsonResponse({ status: 'stored' })
+              : new Response(
+                  JSON.stringify({
+                    error: {
+                      code: 'UPLOAD_FAILED',
+                      message: '합성 업로드 실패',
+                      requestId: 'test',
+                    },
+                  }),
+                  { status: 503 },
+                );
+          }
+          if (url === `${base}/${next.id}` && init?.method === 'POST') {
+            expect(stored).toBe(true);
+            expect(init.headers).toMatchObject({ 'if-match': '"1"' });
+            applied = true;
+            return jsonResponse({ id: next.id, applied: true });
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        });
+      renderStudio();
+      fireEvent.click(
+        within(
+          await screen.findByRole('row', { name: /교체 테스트/u }),
+        ).getByRole('button', { name: '선택하고 자료 등록' }),
+      );
+      fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+      const mode = await screen.findByRole('radio', { name: '기존 자료 교체' });
+      await waitFor(() => expect(mode).toBeEnabled());
+      fireEvent.click(mode);
+      fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+        target: {
+          files: [
+            new File(['a,b\nc,1\n'], '내부산출서.csv', { type: 'text/csv' }),
+          ],
+        },
+      });
+      const submit = screen.getByRole('button', { name: '원본 검사 후 교체' });
+      fireEvent.submit(submit.closest('form')!);
+      expect(created).toBe(false);
+      expect(confirm).toHaveBeenCalledTimes(1);
+      confirm.mockReturnValue(true);
+      fireEvent.submit(submit.closest('form')!);
+      await waitFor(() =>
+        expect(
+          document.querySelector('.source-upload-progress'),
+        ).toHaveTextContent(
+          succeeds ? '파일로 교체 완료' : '교체 미적용, 기존 자료 유지',
+        ),
+      );
+      expect(applied).toBe(succeeds);
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(
+        fetchSpy.mock.calls.filter(
+          ([input, init]) =>
+            requestUrl(input) === base && init?.method === 'POST',
+        ),
+      ).toHaveLength(1);
+      if (succeeds) {
+        const history = screen
+          .getByText(/교체된 이전 자료/u)
+          .closest('details')!;
+        expect(history).not.toHaveAttribute('open');
+        expect(within(history).getByText('이전 자료')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '교체 적용' })).toBeNull();
+      } else {
+        expect(screen.getByText('교체 대기 · 기존 자료 유지')).toBeVisible();
+        expect(screen.queryByText(/교체된 이전 자료/u)).toBeNull();
+      }
+      expect(
+        within(
+          screen.getByRole('group', { name: '자료 등록 상단 작업' }),
+        ).getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+      ).toBeEnabled();
+    },
+  );
 
   it('keeps a failed source selection retryable and reports the exact saved count', async () => {
     const project = projectFixture('P100', '웹 검수 프로젝트');

@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The single tabindex enables keyboard scrolling of the wide project table, required by WCAG 2.1.1. */
 
 import {
   AlertTriangle,
@@ -143,7 +144,12 @@ export function ProjectRegistrationWorkspace({
           </ul>
         </div>
       ) : (
-        <div className="project-table-wrap">
+        // Keyboard users must be able to scroll the wide project table.
+        <section
+          className="project-table-wrap"
+          tabIndex={0}
+          aria-label="프로젝트 목록 표"
+        >
           <table className="project-table">
             <caption className="sr-only">
               접근 가능한 검수 프로젝트 목록
@@ -212,7 +218,7 @@ export function ProjectRegistrationWorkspace({
               검색 조건에 맞는 프로젝트가 없습니다.
             </p>
           )}
-        </div>
+        </section>
       )}
     </section>
   );

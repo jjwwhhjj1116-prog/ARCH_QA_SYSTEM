@@ -53,6 +53,25 @@ export class SourcePackageService {
     return this.repository.archive(record);
   }
 
+  applyReplacement(
+    projectId: string,
+    reviewCaseId: string,
+    packageId: string,
+    expectedVersion: number,
+    actor: Actor,
+    requestId: string,
+  ) {
+    return this.repository.applyReplacement({
+      projectId,
+      reviewCaseId,
+      packageId,
+      expectedVersion,
+      actor,
+      requestId,
+      archivedAt: this.now(),
+    });
+  }
+
   async create(
     projectId: string,
     reviewCaseId: string,
@@ -82,6 +101,7 @@ export class SourcePackageService {
       INGESTION_HARD_RULE_VERSION,
       parsed.displayName,
       declarations,
+      parsed.replaces,
     );
     const packageId = crypto.randomUUID();
     const files = declarations.map(({ declaration, purpose }) =>
@@ -100,6 +120,7 @@ export class SourcePackageService {
       idempotencyKey: safeIdempotencyKey,
       requestHash,
       hardRuleVersion: INGESTION_HARD_RULE_VERSION,
+      replaces: parsed.replaces,
       files,
       createdAt,
       expiresAt,
@@ -147,6 +168,7 @@ async function requestFingerprint(
     declaration: SourceDeclaration;
     purpose: 'quantity_source' | 'reference' | 'attachment';
   }>,
+  replaces?: Array<{ id: string; version: number }>,
 ): Promise<string> {
   const canonicalFiles = files
     .map(({ declaration, purpose }) => ({ ...declaration, purpose }))
@@ -160,6 +182,9 @@ async function requestFingerprint(
       hardRuleVersion,
       displayName,
       files: canonicalFiles,
+      ...(replaces
+        ? { replaces: [...replaces].sort((a, b) => a.id.localeCompare(b.id)) }
+        : {}),
     }),
   );
   const digest = await crypto.subtle.digest('SHA-256', payload);

@@ -383,9 +383,27 @@ test('project page exposes the full Korean workflow and persists a new project',
     .getByRole('row', { name: new RegExp(projectName, 'u') })
     .getByRole('button', { name: '선택하고 자료 등록' })
     .click();
+  const reselectedFinishTeam = page.getByRole('button', {
+    name: '마감팀',
+    exact: true,
+  });
+  await expect(reselectedFinishTeam).toBeEnabled();
+  await reselectedFinishTeam.click();
   await expect(
     page.getByText(`${projectName} 마감팀`, { exact: true }),
   ).toBeVisible();
+  const reloadedCases = await page.request.get(
+    `/api/projects/${projectId}/cases`,
+  );
+  expect(reloadedCases.status()).toBe(200);
+  const afterReload = (await reloadedCases.json()).data as Array<{
+    id: string;
+    name: string;
+  }>;
+  expect(afterReload).toHaveLength(2);
+  expect(
+    afterReload.find((item) => item.name === `${projectName} 마감팀`)?.id,
+  ).toBe(caseId);
 });
 
 test('critical accessibility scan has no violations', async ({ page }) => {

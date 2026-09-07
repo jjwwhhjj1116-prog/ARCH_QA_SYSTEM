@@ -41,6 +41,20 @@ const partial: SourcePackageSummary = {
 };
 
 describe('document availability is guidance, not a full-package gate', () => {
+  it('excludes pending replacements and superseded sources from current input', () => {
+    const replaces = [{ id: 'old', version: 1 }];
+    expect(hasUsableStoredSources({ ...partial, replaces })).toBe(false);
+    expect(hasUsableStoredSources({ ...partial, supersededBy: 'new' })).toBe(
+      false,
+    );
+    expect(
+      hasUsableStoredSources({
+        ...partial,
+        replaces,
+        replacementAppliedAt: '2026-09-03T00:00:00Z',
+      }),
+    ).toBe(true);
+  });
   it('lets stored files proceed without promoting a partially received package', () => {
     expect(hasUsableStoredSources(partial)).toBe(true);
     expect(partial.status).toBe('receiving');

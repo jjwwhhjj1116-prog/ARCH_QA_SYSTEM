@@ -1,5 +1,9 @@
 # API Contracts
 
+## 2026-09-07 implemented FIN review endpoint
+
+`/api/projects/:projectId/review` now implements the bounded mapping → guideline trial/activation → formal run → decision workflow. Exact request schemas live in `lib/review/server.ts`; per-action semantics, limits, error codes and append-only history are documented in `CONCOST_QC_WORKSTATION_GUIDE.md`. Mapping writes require baseVersionId; immutable D1 guards reject stale or unauthorized writes atomically with audit. XLSX report export uses a fetched frozen run and explicit string cells. This does not yet implement general AI review, asynchronous jobs, final report approval or cross-revision automatic finding matching.
+
 This document defines transport-independent contracts. Implement them as HTTP JSON routes or supported full-stack server actions in the chosen Sites starter.
 
 ## 1. Conventions
@@ -391,6 +395,29 @@ Protected or minimally revealing output includes:
 - Never cache one user's authorized response for another user.
 
 ## 18. Contract tests
+
+### Implemented replacement extension (2026-09-03)
+
+- `POST /api/projects/:projectId/cases/:caseId/source-packages` accepts optional
+  `replaces: [{id, version}]` (1–32 unique package IDs in the same project/case).
+  Omitting it preserves additional-upload behavior. Idempotency includes the
+  immutable target IDs and versions; changing bytes requires a new upload intent.
+- Source-package lists return `replaces`, `replacementAppliedAt`, and
+  `supersededBy`. Pending replacement and superseded packages are never current
+  review input, even when stored bytes exist. History is retained, not hard-deleted.
+- `POST /api/projects/:projectId/cases/:caseId/source-packages/:packageId` with
+  `If-Match: "<version>"` activates that stored replacement. No body is required.
+  Same-site mutation, active project/case membership, upload role, ownership,
+  every target/version and finalized byte completion are checked server-side.
+  Success is `{ data: { id, applied: true }, requestId }`; conflicts are 409.
+  Retries of an applied package are idempotent and cannot reactivate old input.
+- Existing `DELETE` can cancel a pending replacement after uploads stop, including
+  a fully stored but unapplied package. Originals remain unchanged. Transactional
+  authorization and an audit marker gate every archive mutation.
+- See [ADR-006](adr/ADR-006-source-package-replacement.md) for migration and
+  rollback constraints. This extension is not workbook parsing or AI execution.
+
+### Verification
 
 - request/response schema validation;
 - role/project authorization matrix;

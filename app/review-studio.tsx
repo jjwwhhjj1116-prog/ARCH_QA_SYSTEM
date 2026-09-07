@@ -6,7 +6,6 @@ import {
   BarChart3,
   Check,
   ChevronDown,
-  Download,
   FileScan,
   FileSpreadsheet,
   FolderKanban,
@@ -14,7 +13,6 @@ import {
   Link2Off,
   Layers3,
   Menu,
-  RefreshCcw,
   Search,
   Settings,
   UserRound,
@@ -36,9 +34,13 @@ import type {
 } from '@/lib/domain/contracts';
 import { canonicalSourceFilename } from '@/lib/imports/source-filename';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
-import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
+import {
+  hasUsableStoredSources,
+  isPendingReplacement,
+} from '@/lib/ingestion/document-checklist';
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
+import { ReviewWorkbench } from './review-workbench';
 import {
   ProjectArchiveDialog,
   ProjectCreationForm,
@@ -91,7 +93,11 @@ export function ReviewStudio({
   const [caseSubmitting, setCaseSubmitting] = useState(false);
   const [caseReloadToken, setCaseReloadToken] = useState(0);
   const [uploadCaseId, setUploadCaseId] = useState<string | null>(null);
+  const [reviewCaseId, setReviewCaseId] = useState<string | null>(null);
   const [sourceFiles, setSourceFiles] = useState<File[]>([]);
+  const [uploadMode, setUploadMode] = useState<'append' | 'replace'>('append');
+  const replacementTargetsRef =
+    useRef<SourcePackageSummary['replaces']>(undefined);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
@@ -152,6 +158,8 @@ export function ReviewStudio({
 
   const selectProject = useCallback((projectId: string) => {
     if (uploadingRef.current) return;
+    setMobileNav(false);
+    setReviewCaseId(null);
     if (selectedProjectIdRef.current !== projectId) {
       selectionEpochRef.current += 1;
       selectedProjectIdRef.current = projectId;
@@ -160,6 +168,8 @@ export function ReviewStudio({
       setCaseState('loading');
       setUploadCaseId(null);
       setSourceFiles([]);
+      setUploadMode('append');
+      replacementTargetsRef.current = undefined;
       setUploadProgress('');
       setUploadStatus('idle');
       setUploadCompletedCount(0);
@@ -183,6 +193,8 @@ export function ReviewStudio({
     setReviewCases([]);
     setUploadCaseId(null);
     setSourceFiles([]);
+    setUploadMode('append');
+    replacementTargetsRef.current = undefined;
     setUploadProgress('');
     setUploadStatus('idle');
     setUploadCompletedCount(0);
@@ -487,6 +499,8 @@ export function ReviewStudio({
     uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
     setUploadCaseId(reviewCaseId);
     setSourceFiles([]);
+    setUploadMode('append');
+    replacementTargetsRef.current = undefined;
     setUploadStatus('idle');
     setUploadCompletedCount(0);
     setUploadFailures([]);
@@ -499,6 +513,8 @@ export function ReviewStudio({
     uploadKeyRef.current = null;
     setUploadCaseId(null);
     setSourceFiles([]);
+    setUploadMode('append');
+    replacementTargetsRef.current = undefined;
     setUploadProgress('');
     setUploadStatus('idle');
     setUploadCompletedCount(0);
@@ -510,6 +526,8 @@ export function ReviewStudio({
   }
 
   function changeSourceFiles(files: File[]) {
+    if (uploadingRef.current) return;
+    replacementTargetsRef.current = undefined;
     setSourceFiles(files);
     setUploadStatus('idle');
     setUploadCompletedCount(0);
@@ -525,7 +543,35 @@ export function ReviewStudio({
     event: SyntheticEvent<HTMLFormElement, SubmitEvent>,
   ) {
     event.preventDefault();
-    if (!selectedProject || !uploadCaseId || sourceFiles.length === 0) return;
+    if (
+      uploadingRef.current ||
+      !selectedProject ||
+      !uploadCaseId ||
+      sourceFiles.length === 0
+    )
+      return;
+    if (uploadMode === 'replace') {
+      if (sourcePackageState !== 'ready') return;
+      const targets =
+        replacementTargetsRef.current ??
+        sourcePackages
+          .filter((item) => !item.supersededBy && !isPendingReplacement(item))
+          .map((item) => ({ id: item.id, version: item.version }));
+      if (targets.length === 0 || targets.length > 32) {
+        setMessageTone('error');
+        setMessage(
+          '교체할 기존 자료는 1~32묶음이어야 합니다. 저장 내역을 확인하세요.',
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          `${selectedProject.name} · ${reviewCases.find((item) => item.id === uploadCaseId)?.name ?? '선택한 자료 기록'}의 기존 ${targets.length}묶음을 새 ${sourceFiles.length}개 파일로 교체할까요?\n새 파일이 모두 저장된 뒤 교체합니다. 이전 원본은 이력으로 보관하며 다른 팀·자료 기록은 변경하지 않습니다.`,
+        )
+      )
+        return;
+      replacementTargetsRef.current = targets;
+    }
     let canonicalFiles: Array<{ file: File; name: string }>;
     try {
       canonicalFiles = sourceFiles.map((file) => ({
@@ -570,6 +616,9 @@ export function ReviewStudio({
           },
           body: JSON.stringify({
             displayName: `${selectedProject.name} 산출서와 집계표`,
+            ...(uploadMode === 'replace'
+              ? { replaces: replacementTargetsRef.current }
+              : {}),
             files: sourceFiles.map((file) => ({
               filename: file.name,
               contentType: declaredContentType(file),
@@ -659,7 +708,7 @@ export function ReviewStudio({
           setUploadFailures([...failures]);
         }
       }
-      const persistedPackages = await loadSourcePackages(
+      let persistedPackages = await loadSourcePackages(
         targetProjectId,
         targetCaseId,
       );
@@ -684,12 +733,32 @@ export function ReviewStudio({
           )}개는 차단했습니다. 아래 파일별 사유를 확인해 주세요.`,
         );
         setUploadProgress(
-          `${persistedCount}/${total}개 서버 저장 완료 · 실패한 파일 때문에 다른 정상 파일 저장은 중단하지 않았습니다.`,
+          uploadMode === 'replace'
+            ? `${persistedCount}/${total}개 저장 · 교체 미적용, 기존 자료 유지. 실패 파일을 확인한 뒤 다시 저장하세요.`
+            : `${persistedCount}/${total}개 서버 저장 완료 · 실패한 파일 때문에 다른 정상 파일 저장은 중단하지 않았습니다.`,
         );
         return;
       }
+      if (persistedPackage && isPendingReplacement(persistedPackage)) {
+        setUploadProgress('새 파일 저장 완료 · 기존 자료를 교체하는 중…');
+        await requestReplacement(persistedPackage);
+        persistedPackages = await loadSourcePackages(
+          targetProjectId,
+          targetCaseId,
+        );
+        if (
+          !persistedPackages?.find((item) => item.id === packageId)
+            ?.replacementAppliedAt
+        ) {
+          throw new Error(
+            '교체 적용 응답을 받았지만 목록 확인이 필요합니다. 저장 내역을 다시 불러오세요.',
+          );
+        }
+      }
       setUploadProgress(
-        `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
+        uploadMode === 'replace'
+          ? `${persistedCount}/${total}개 파일로 교체 완료 · 이전 자료는 검수 대상에서 제외하고 이력으로 보관했습니다.`
+          : `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
       );
       setUploadStatus('success');
       if (selectedProjectIdRef.current === targetProjectId) {
@@ -703,6 +772,8 @@ export function ReviewStudio({
         `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
       );
       setSourceFiles([]);
+      setUploadMode('append');
+      replacementTargetsRef.current = undefined;
       setUploadFailures([]);
       uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
     } catch (error) {
@@ -727,6 +798,67 @@ export function ReviewStudio({
         persistedPackages
           ? `${persistedCount}/${total}개 서버 저장 확인 · 중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.`
           : `${completed}/${total}개 저장 응답 · 서버 목록 재확인에 실패했습니다. 목록을 다시 불러온 뒤 재시도하세요.`,
+      );
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
+    }
+  }
+
+  async function requestReplacement(sourcePackage: SourcePackageSummary) {
+    const response = await fetch(
+      `/api/projects/${sourcePackage.projectId}/cases/${sourcePackage.reviewCaseId}/source-packages/${sourcePackage.id}`,
+      {
+        method: 'POST',
+        headers: { 'if-match': `"${sourcePackage.version}"` },
+      },
+    );
+    const body = (await response.json()) as
+      | ApiSuccessEnvelope<{ id: string; applied: true }>
+      | ApiErrorEnvelope;
+    if (!response.ok || 'error' in body)
+      throw new Error(
+        'error' in body
+          ? body.error.message
+          : '교체를 적용하지 못했습니다. 저장 내역을 확인하세요.',
+      );
+  }
+
+  async function applyStoredReplacement(sourcePackage: SourcePackageSummary) {
+    if (
+      uploadingRef.current ||
+      selectedProjectIdRef.current !== sourcePackage.projectId ||
+      uploadCaseId !== sourcePackage.reviewCaseId
+    )
+      return;
+    if (
+      !window.confirm(
+        `저장된 새 파일로 기존 ${sourcePackage.replaces?.length ?? 0}묶음을 교체할까요? 이전 원본은 이력으로 남습니다.`,
+      )
+    )
+      return;
+    uploadingRef.current = true;
+    setUploading(true);
+    try {
+      await requestReplacement(sourcePackage);
+      const packages = await loadSourcePackages(
+        sourcePackage.projectId,
+        sourcePackage.reviewCaseId,
+      );
+      if (
+        !packages?.find((item) => item.id === sourcePackage.id)
+          ?.replacementAppliedAt
+      ) {
+        throw new Error(
+          '교체 적용 응답을 받았지만 목록 확인이 필요합니다. 저장 내역을 다시 불러오세요.',
+        );
+      }
+      setMessageTone('success');
+      setMessage('자료 교체를 적용했습니다. 새 자료로 검수를 진행하세요.');
+    } catch (error) {
+      setMessageTone('error');
+      setMessage(
+        error instanceof Error ? error.message : '교체를 적용하지 못했습니다.',
       );
     } finally {
       uploadingRef.current = false;
@@ -921,7 +1053,7 @@ export function ReviewStudio({
       <aside
         ref={primarySidebarRef}
         id="primary-navigation"
-        className={`primary-sidebar${mobileNav ? ' is-open' : ''}`}
+        className={`sidebar primary-sidebar${mobileNav ? ' is-open' : ''}`}
         aria-label="주요 메뉴"
       >
         <div className="brand-lockup">
@@ -1114,25 +1246,9 @@ export function ReviewStudio({
               <ChevronDown aria-hidden="true" />
             </label>
           </div>
-          <div className="topbar-actions">
-            <span className="engine-state-note" id="engine-action-status">
-              <AlertTriangle aria-hidden="true" /> AI 검수 미실행
-            </span>
-            <button
-              type="button"
-              disabled
-              aria-describedby="engine-action-status"
-            >
-              <RefreshCcw aria-hidden="true" /> AI 재검수
-            </button>
-            <button
-              type="button"
-              disabled
-              aria-describedby="engine-action-status"
-            >
-              <Download aria-hidden="true" /> Excel 다운로드
-            </button>
-          </div>
+          <span className="qc-release-marker">
+            FIN 검수 작업실 · 2026.09.07
+          </span>
         </header>
 
         {activeView !== 'settings' && (
@@ -1187,6 +1303,14 @@ export function ReviewStudio({
               caseSubmitting={caseSubmitting}
               uploadCaseId={uploadCaseId}
               sourceFiles={sourceFiles}
+              uploadMode={uploadMode}
+              onUploadModeChange={(mode) => {
+                if (uploadingRef.current) return;
+                setUploadMode(mode);
+                replacementTargetsRef.current = undefined;
+                uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
+              }}
+              onApplyReplacement={(item) => void applyStoredReplacement(item)}
               uploading={uploading}
               uploadProgress={uploadProgress}
               uploadStatus={uploadStatus}
@@ -1213,10 +1337,32 @@ export function ReviewStudio({
                 void archiveSourcePackage(sourcePackage)
               }
               onContinueToAiReview={() => {
+                if (
+                  sourceFiles.length > 0 &&
+                  !window.confirm(
+                    '아직 저장하지 않은 선택 파일이 있습니다. 선택을 취소하고 현재 저장된 자료로 검수 단계에 이동할까요?',
+                  )
+                )
+                  return;
+                setReviewCaseId(uploadCaseId);
                 closeSourceUpload();
                 navigate('formula-ai');
               }}
               onUpload={(event) => void uploadSources(event)}
+            />
+          ) : (activeView === 'formula-ai' || activeView === 'duplicate-ai') &&
+            selectedProject ? (
+            <ReviewWorkbench
+              key={selectedProject.id}
+              project={selectedProject}
+              cases={reviewCases}
+              initialCaseId={reviewCaseId ?? uploadCaseId}
+              mode={activeView}
+              onCaseChange={setReviewCaseId}
+              onSources={() => {
+                navigate('project-data');
+                if (reviewCaseId) openSourceUpload(reviewCaseId);
+              }}
             />
           ) : (
             <ModuleWorkspace
@@ -1349,7 +1495,7 @@ function WorkflowRail({
               <small>AI REVIEW 01</small>
               <strong>산출식 AI 검수</strong>
               <span>
-                건물 규모와 부위 기준을 벗어난 과대·이상 산출식을 찾습니다.
+                확인된 산식·치수와 지침을 대조합니다. AI 의미 검수는 후속입니다.
               </span>
             </span>
             <span className="ai-review-choice-action">
@@ -1369,9 +1515,7 @@ function WorkflowRail({
             <span className="ai-review-choice-copy">
               <small>AI REVIEW 02</small>
               <strong>중복 ITEM AI 검수</strong>
-              <span>
-                유사 품명·규격·재료코드를 비교해 표준 통합 후보를 만듭니다.
-              </span>
+              <span>동별집계표의 중복 코드·공종 분산 후보를 확인합니다.</span>
             </span>
             <span className="ai-review-choice-action">
               {activeView === 'duplicate-ai' ? '현재 선택' : '검수 화면 열기'}

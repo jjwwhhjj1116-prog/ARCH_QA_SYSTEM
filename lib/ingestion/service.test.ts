@@ -279,6 +279,9 @@ describe('SourcePackageService', () => {
 });
 
 class CapturingRepository implements SourcePackageRepository {
+  applyReplacement(record: ArchiveSourcePackageRecord) {
+    return Promise.resolve({ id: record.packageId, applied: true as const });
+  }
   readonly records: NewSourcePackageRecord[] = [];
   readonly archiveCalls: ArchiveSourcePackageRecord[] = [];
   readonly listCalls: Array<{

@@ -1,7 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import './globals.css';
-import './qto-studio.css';
-import './claim-center-theme.css';
+import './workstation.css';
 
 export const metadata: Metadata = {
   title: 'CONCOST 기술본부 QC 스튜디오',

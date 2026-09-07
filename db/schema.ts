@@ -145,6 +145,10 @@ export const sourcePackages = sqliteTable(
       enum: ['pending', 'matched', 'unknown', 'conflict'],
     }).notNull(),
     hardRuleVersion: text('hard_rule_version').notNull(),
+    replacementTargetsJson: text('replacement_targets_json'),
+    replacementAppliedAt: integer('replacement_applied_at', {
+      mode: 'timestamp_ms',
+    }),
     idempotencyKey: text('idempotency_key').notNull(),
     requestHash: text('request_hash').notNull(),
     version: integer('version').notNull(),

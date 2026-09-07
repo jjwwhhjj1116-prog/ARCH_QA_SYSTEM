@@ -5,14 +5,16 @@ import {
 } from '@/lib/ingestion/repository';
 
 const archive = vi.fn();
+const applyReplacement = vi.fn();
 
 vi.mock('@/lib/ingestion/d1-repository', () => ({
   D1SourcePackageRepository: class {
     archive = archive;
+    applyReplacement = applyReplacement;
   },
 }));
 
-const { DELETE } = await import('./route');
+const { DELETE, POST } = await import('./route');
 const projectId = '11111111-1111-4111-8111-111111111111';
 const caseId = '22222222-2222-4222-8222-222222222222';
 const packageId = '33333333-3333-4333-8333-333333333333';
@@ -21,6 +23,27 @@ const context = {
 };
 
 describe('source package archive API boundary', () => {
+  it('requires same-site identity and version before applying stored replacement', async () => {
+    process.env.LOCAL_DEMO_MODE = 'true';
+    applyReplacement.mockResolvedValue({ id: packageId, applied: true });
+    expect((await POST(request(), context)).status).toBe(200);
+    expect(applyReplacement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packageId,
+        projectId,
+        reviewCaseId: caseId,
+        expectedVersion: 3,
+      }),
+    );
+    applyReplacement.mockClear();
+    expect(
+      (await POST(request({ 'sec-fetch-site': 'cross-site' }), context)).status,
+    ).toBe(403);
+    expect((await POST(request({ 'if-match': '' }), context)).status).toBe(400);
+    process.env.LOCAL_DEMO_MODE = 'false';
+    expect((await POST(request(), context)).status).toBe(401);
+    expect(applyReplacement).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LOCAL_DEMO_MODE = 'true';

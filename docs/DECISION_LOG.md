@@ -1,5 +1,20 @@
 # Decision Log
 
+## 2026-09-07 — Actual FIN evidence workstation and private publishing
+
+User explicitly requests a major UI/review rebuild, staged global skills, subagents and deployment. ADR-007 and `CONCOST_QC_WORKSTATION_GUIDE.md` define the bounded first implementation. Add mapping/profile/run/approval/decision immutable records (0005) with atomic role/CAS guards. Owner activation of a tested guideline is configuration authorization, not report approval; final report/self-approval remains unavailable. No automated source correction. Four implemented rule families plus unreviewable parsing, not a claim that all 20 proposed checks work. AI semantic classification, variable resolution and drawing/quantity correctness remain needs-domain-validation.
+
+Main consolidates live CSS and preserves prior upload/replacement behavior. Read-only agents independently test FIN semantics, UI state and large-input safety; resulting regression fixes cover cross-trade headers, zero baseline, summary/detail isolation and mapping collision. Three global skills installed/validated, see `QC_SKILL_PIPELINE.md`. Keep current owner-only audience and existing original files. This user request authorizes publishing, not audience expansion.
+
+## 2026-09-03 — Source replacement and upper workflow action
+
+QC-UPLOAD-TOP / QC-SOURCE-REPLACE: [ADR-006](adr/ADR-006-source-package-replacement.md)
+defines explicit, all-files-success replacement within the selected case. Preserve
+immutable originals and previous runs; hide superseded input from active review.
+Use two additive nullable D1 columns and transaction-level authorization/audit
+markers. The upper STEP 2 action remains visible even before storage, disabled
+until usable saved input exists. Production release remains approval-gated.
+
 Use this file as the human-readable index of accepted architecture and product decisions. Create one ADR from `tasks/ADR_TEMPLATE.md` for every material decision, then add a row here.
 
 | ID    | Date       | Decision                                                                                                                                                                                                 | Status     | ADR / evidence                                          | Owner               |
