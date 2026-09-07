@@ -80,6 +80,10 @@ test('project page exposes the full Korean workflow and persists a new project',
   const testToken = `${testInfo.project.name.replace(/\W/gu, '').toUpperCase()}${Date.now()}`;
   const projectName = `브라우저 통합 검수 ${testToken}`;
   await page.getByRole('button', { name: '새 프로젝트 등록' }).click();
+  await expect(page.getByLabel('프로젝트명')).toHaveCSS(
+    'background-color',
+    'rgb(255, 248, 214)',
+  );
   await page.getByLabel('프로젝트명').fill(projectName);
   await page.getByLabel('발주처·고객사 (선택)').fill('로컬 자동시험');
   await page.getByRole('button', { name: '프로젝트 만들기' }).click();
@@ -147,6 +151,61 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(
     aiChooser.getByRole('button', { name: /중복 ITEM AI 검수/u }),
   ).toBeVisible();
+  const formulaChoice = aiChooser.getByRole('button', {
+    name: '산출식 AI 검수',
+    exact: true,
+  });
+  const duplicateChoice = aiChooser.getByRole('button', {
+    name: '중복 ITEM AI 검수',
+    exact: true,
+  });
+  await page.mouse.move(0, 0);
+  await expect(formulaChoice).toHaveCSS(
+    'background-color',
+    'rgb(255, 240, 222)',
+  );
+  await expect(duplicateChoice).toHaveCSS(
+    'background-color',
+    'rgb(255, 255, 255)',
+  );
+  await expect(formulaChoice.locator('.ai-review-choice-action')).toContainText(
+    '현재 선택',
+  );
+  await expect(formulaChoice.locator('.lucide-check')).toBeVisible();
+  const titleSize = await formulaChoice
+    .locator('strong')
+    .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+  expect(titleSize).toBeGreaterThanOrEqual(22);
+  await expect(page.locator('.sidebar-project-add')).toHaveCSS(
+    'background-color',
+    'rgb(255, 107, 0)',
+  );
+  await expect(page.locator('.qc-start-review')).toHaveCSS(
+    'background-color',
+    'rgb(29, 78, 216)',
+  );
+  await formulaChoice.focus();
+  await page.keyboard.press('Tab');
+  await expect(duplicateChoice).toBeFocused();
+  await expect(duplicateChoice).toHaveCSS('outline-style', 'solid');
+  await page.keyboard.press('Enter');
+  await expect(duplicateChoice).toHaveAttribute('aria-current', 'page');
+  await expect(duplicateChoice).toHaveCSS(
+    'background-color',
+    'rgb(255, 240, 222)',
+  );
+  await expect(formulaChoice).toHaveCSS(
+    'background-color',
+    'rgb(255, 255, 255)',
+  );
+  await formulaChoice.click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  mkdirSync('.impeccable/review', { recursive: true });
+  await page.screenshot({
+    path: `.impeccable/review/colors-${test.info().project.name}.png`,
+    fullPage: true,
+  });
   await page
     .getByRole('button', { name: '자료 자동 확인·저장', exact: true })
     .click();
@@ -213,6 +272,19 @@ test('project page exposes the full Korean workflow and persists a new project',
   await page
     .locator('.qc-evidence textarea')
     .fill('Synthetic unsaved review note');
+  await expect(page.locator('.qc-evidence textarea')).toHaveCSS(
+    'background-color',
+    'rgb(255, 248, 214)',
+  );
+  await expect(page.locator('.qc-original')).not.toHaveCSS(
+    'background-color',
+    'rgb(255, 248, 214)',
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
   let confirmationMessage = '';
   page.once('dialog', async (dialog) => {
     confirmationMessage = dialog.message();

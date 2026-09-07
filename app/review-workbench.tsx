@@ -2150,6 +2150,7 @@ function ConditionEditor({
               />
               <button
                 type="button"
+                className="danger-action"
                 onClick={() =>
                   onChange({
                     ...profile,

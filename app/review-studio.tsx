@@ -1341,7 +1341,7 @@ function ReviewStudioContent({
           </div>
           <span className="qc-release-marker">
             {' '}
-            <UiText text="FIN 검수 작업실 · v15 · 2026.09.07" />{' '}
+            <UiText text="FIN 검수 작업실 · v16 · 2026.09.07" />{' '}
           </span>
           <LanguageSwitch />
         </header>
@@ -1662,6 +1662,7 @@ function WorkflowRail({
           <button
             className={`ai-review-choice is-formula${activeView === 'formula-ai' ? ' is-active' : ''}`}
             type="button"
+            aria-label={uiText('산출식 AI 검수')}
             aria-current={activeView === 'formula-ai' ? 'page' : undefined}
             onClick={() => onNavigate('formula-ai')}
           >
@@ -1678,16 +1679,17 @@ function WorkflowRail({
                 <UiText text="확인된 산식·치수와 지침을 대조합니다. AI 의미 검수는 후속입니다." />{' '}
               </span>
             </span>
-            <span className="ai-review-choice-action">
+            <span className="ai-review-choice-action" aria-hidden="true">
               {activeView === 'formula-ai'
                 ? uiText('현재 선택')
                 : uiText('검수 화면 열기')}
-              <ArrowRight aria-hidden="true" />
+              {activeView === 'formula-ai' ? <Check /> : <ArrowRight />}
             </span>
           </button>
           <button
             className={`ai-review-choice is-duplicate${activeView === 'duplicate-ai' ? ' is-active' : ''}`}
             type="button"
+            aria-label={uiText('중복 ITEM AI 검수')}
             aria-current={activeView === 'duplicate-ai' ? 'page' : undefined}
             onClick={() => onNavigate('duplicate-ai')}
           >
@@ -1703,11 +1705,11 @@ function WorkflowRail({
                 <UiText text="동별집계표의 중복 코드·공종 분산 후보를 확인합니다." />
               </span>
             </span>
-            <span className="ai-review-choice-action">
+            <span className="ai-review-choice-action" aria-hidden="true">
               {activeView === 'duplicate-ai'
                 ? uiText('현재 선택')
                 : uiText('검수 화면 열기')}
-              <ArrowRight aria-hidden="true" />
+              {activeView === 'duplicate-ai' ? <Check /> : <ArrowRight />}
             </span>
           </button>
         </nav>

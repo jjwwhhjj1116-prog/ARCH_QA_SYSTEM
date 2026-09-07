@@ -6,7 +6,7 @@ import { useWorkspacePreferences } from './workspace-preferences';
 
 export const vietnamese: Record<string, string> = {
   ...viWorkflow,
-  'FIN 검수 작업실 · v15 · 2026.09.07': 'Phòng kiểm tra FIN · v15 · 2026.09.07',
+  'FIN 검수 작업실 · v16 · 2026.09.07': 'Phòng kiểm tra FIN · v16 · 2026.09.07',
   '상단 실행 버튼으로 전체 자료를 확인하고 검수를 시작하세요. 검사하지 않은 항목은 정상으로 표시하지 않습니다.':
     'Nhấn nút phía trên để nhận diện toàn bộ tài liệu và bắt đầu kiểm tra. Mục chưa kiểm tra không được coi là bình thường.',
   '상세 산출서의 산식과 치수를 확인합니다. 근거가 부족한 항목은 정상으로 처리하지 않습니다.':
