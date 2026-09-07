@@ -62,24 +62,24 @@ CREATE TRIGGER qc_approval_immutable_delete BEFORE DELETE ON qc_profile_approval
 -- Insert guards execute inside the same D1 batch as the record and its audit event.
 --> statement-breakpoint
 CREATE TRIGGER qc_profile_member BEFORE INSERT ON qc_profile_version BEGIN
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id WHERE p.id=NEW.project_id AND p.status='active' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END;
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id WHERE p.id=NEW.project_id AND p.status='active' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END);
 END;
 --> statement-breakpoint
 CREATE TRIGGER qc_mapping_member BEFORE INSERT ON qc_mapping_version BEGIN
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND rc.id=NEW.case_id AND rc.status<>'archived' AND rc.discipline='FIN' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END;
- SELECT CASE WHEN NEW.base_id<>COALESCE((SELECT id FROM qc_mapping_version WHERE project_id=NEW.project_id AND case_id=NEW.case_id ORDER BY rowid DESC LIMIT 1),'initial') THEN RAISE(ABORT,'MAPPING_CONFLICT') END;
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND rc.id=NEW.case_id AND rc.status<>'archived' AND rc.discipline='FIN' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END);
+ SELECT (CASE WHEN NEW.base_id<>COALESCE((SELECT id FROM qc_mapping_version WHERE project_id=NEW.project_id AND case_id=NEW.case_id ORDER BY rowid DESC LIMIT 1),'initial') THEN RAISE(ABORT,'MAPPING_CONFLICT') END);
 END;
 --> statement-breakpoint
 CREATE TRIGGER qc_run_member BEFORE INSERT ON qc_review_run BEGIN
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND rc.id=NEW.case_id AND rc.status<>'archived' AND rc.discipline='FIN' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END;
- SELECT CASE WHEN NEW.trial=0 AND NOT EXISTS (SELECT 1 FROM qc_profile_approval WHERE profile_id=NEW.profile_id AND project_id=NEW.project_id) THEN RAISE(ABORT,'PROFILE_NOT_APPROVED') END;
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND rc.id=NEW.case_id AND rc.status<>'archived' AND rc.discipline='FIN' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END);
+ SELECT (CASE WHEN NEW.trial=0 AND NOT EXISTS (SELECT 1 FROM qc_profile_approval WHERE profile_id=NEW.profile_id AND project_id=NEW.project_id) THEN RAISE(ABORT,'PROFILE_NOT_APPROVED') END);
 END;
 --> statement-breakpoint
 CREATE TRIGGER qc_approval_member BEFORE INSERT ON qc_profile_approval BEGIN
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id WHERE p.id=NEW.project_id AND p.status='active' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','approver')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END;
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM qc_review_run WHERE id=NEW.trial_run_id AND project_id=NEW.project_id AND profile_id=NEW.profile_id AND trial=1) THEN RAISE(ABORT,'TRIAL_REQUIRED') END;
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id WHERE p.id=NEW.project_id AND p.status='active' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','approver')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END);
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM qc_review_run WHERE id=NEW.trial_run_id AND project_id=NEW.project_id AND profile_id=NEW.profile_id AND trial=1) THEN RAISE(ABORT,'TRIAL_REQUIRED') END);
 END;
 --> statement-breakpoint
 CREATE TRIGGER qc_decision_member BEFORE INSERT ON qc_review_decision BEGIN
- SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN qc_review_run r ON r.project_id=p.id JOIN review_case rc ON rc.id=r.case_id AND rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND r.id=NEW.run_id AND r.trial=0 AND rc.status<>'archived' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer','approver')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END;
+ SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN qc_review_run r ON r.project_id=p.id JOIN review_case rc ON rc.id=r.case_id AND rc.project_id=p.id WHERE p.id=NEW.project_id AND p.status='active' AND r.id=NEW.run_id AND r.trial=0 AND rc.status<>'archived' AND pm.user_id=NEW.actor_id AND pm.role IN ('workspace_admin','project_owner','reviewer','approver')) THEN RAISE(ABORT,'QC_PERMISSION_CHANGED') END);
 END;

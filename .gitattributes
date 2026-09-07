@@ -1,0 +1,2 @@
+# D1 remote migration parsing is sensitive to CRLF in trigger bodies.
+drizzle/0005_fin_review_workstation.sql text eol=lf

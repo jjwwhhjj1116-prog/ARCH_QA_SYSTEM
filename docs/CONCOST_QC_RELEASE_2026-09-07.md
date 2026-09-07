@@ -31,6 +31,6 @@ FIN 도메인, 워크플로/권한, OSS/복잡도 검토를 세 서브에이전�
 
 ## 배포와 복구
 
-첫 배포는 SQL `incomplete input`으로 실패했다. live DB overview에서 qc_* 테이블 5개가 모두 없음을 확인한 후, 아직 적용되지 않은 0005 파일에 Drizzle statement-breakpoint를 추가해 트리거 내부 세미콜론과 문장 경계를 구분했다. 이미 적용된 0001~0004는 수정하지 않았다. 새 SQLite 시험은 각 breakpoint를 하나의 prepare 문장으로 실행해 불변/권한 가드를 검증한다. 같은 실패 아카이브를 반복 배포하지 않는다.
+앞선 배포는 SQL `incomplete input`으로 실패했다. live DB overview에서 qc_* 테이블 5개가 모두 없음을 확인한 후, 미적용 0005에 문장 경계를 추가했지만 원격 실패가 재현됐다. Cloudflare workers-sdk 공식 이슈 [14991](https://github.com/cloudflare/workers-sdk/issues/14991)의 CRLF+트리거 원격 마이그레이션 문제와 [4727](https://github.com/cloudflare/workers-sdk/issues/4727)의 CASE..END 구분 문제를 확인했다. 0005만 LF로 고정하고 CASE 식을 괄호로 묶었다. 보호 트리거와 조건은 제거하지 않았다. 이미 적용된 0001~0004는 수정하지 않았다. 새 SQLite 시험은 각 breakpoint를 하나의 prepare 문장으로 실행해 불변/권한 가드를 검증한다.
 
 검증 소스를 Sites 저장소에 push하고 같은 소스의 빌드를 패키징해 owner-private으로 배포한다. 공개 URL·빌드 표시·접근 상태의 최종 결과는 배포 도구 결과와 브라우저에서 별도로 확인한다. 코드 복구 시 이전 저장 버전으로 배포를 되돌리되 추가된 이력 테이블과 원본 R2 객체를 삭제하지 않는다.
