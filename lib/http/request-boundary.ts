@@ -18,8 +18,18 @@ export function requestIdFrom(headers: Headers): string {
     : crypto.randomUUID();
 }
 
-export function assertSameSiteMutation(headers: Headers): void {
-  if (headers.get('sec-fetch-site')?.toLowerCase() === 'cross-site') {
+export function assertSameSiteMutation(
+  headers: Headers,
+  requestOrigin?: string,
+): void {
+  const origin = headers.get('origin');
+  const expected = process.env.APP_ORIGIN || requestOrigin;
+  const strict = process.env.EMPLOYEE_LOGIN_ENABLED === 'true';
+  if (
+    headers.get('sec-fetch-site')?.toLowerCase() === 'cross-site' ||
+    (origin && expected && origin !== expected) ||
+    (strict && (!origin || !expected))
+  ) {
     throw new RequestBoundaryError(
       403,
       'CROSS_SITE_REQUEST_DENIED',
@@ -28,7 +38,10 @@ export function assertSameSiteMutation(headers: Headers): void {
   }
 }
 
-export async function readJson(request: Request): Promise<unknown> {
+export async function readJson(
+  request: Request,
+  maxBytes = MAX_JSON_BYTES,
+): Promise<unknown> {
   const contentType = request.headers.get('content-type')?.toLowerCase() ?? '';
   if (!contentType.startsWith('application/json')) {
     throw new RequestBoundaryError(
@@ -38,12 +51,28 @@ export async function readJson(request: Request): Promise<unknown> {
     );
   }
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BYTES) {
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     throw tooLarge();
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_JSON_BYTES) {
-    throw tooLarge();
+  const reader = request.body?.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let total = 0;
+  try {
+    if (reader)
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel();
+          throw tooLarge();
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+    text += decoder.decode();
+  } finally {
+    reader?.releaseLock();
   }
   try {
     return JSON.parse(text) as unknown;

@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -46,7 +46,7 @@ export async function GET(
     const params = await context.params;
     const projectId = opaqueIdSchema.parse(params.projectId);
     const caseId = opaqueIdSchema.parse(params.caseId);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const data = await service.list(projectId, caseId, actor);
@@ -66,11 +66,11 @@ export async function POST(
 ): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
     const params = await context.params;
     const projectId = opaqueIdSchema.parse(params.projectId);
     const caseId = opaqueIdSchema.parse(params.caseId);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const idempotencyKey = idempotencyKeySchema.parse(

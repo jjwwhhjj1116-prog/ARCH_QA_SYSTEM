@@ -1,4 +1,5 @@
 'use client';
+import { UiText, useUiText } from './ui-translation';
 
 import {
   AlertTriangle,
@@ -91,6 +92,7 @@ export function ProjectDataWorkspace({
   onContinueToAiReview,
   onUpload,
 }: Props) {
+  const uiText = useUiText();
   const activeCase = reviewCases.find((item) => item.id === uploadCaseId);
   const teamCases = reviewCases.filter(
     (item) =>
@@ -111,12 +113,13 @@ export function ProjectDataWorkspace({
       }
       title={
         !hasStoredSources
-          ? '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.'
+          ? uiText('원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.')
           : undefined
       }
       onClick={onContinueToAiReview}
     >
-      STEP 2 · AI 검수 시작 <ArrowRight aria-hidden="true" />
+      {' '}
+      <UiText text="STEP 2 · AI 검수 시작" /> <ArrowRight aria-hidden="true" />
     </button>
   );
   return (
@@ -126,12 +129,14 @@ export function ProjectDataWorkspace({
       aria-labelledby="page-title"
     >
       <StageHeading
-        eyebrow="STEP 1 / 3 · 자료 등록"
-        title="산출서와 집계표를 등록하세요"
+        eyebrow={uiText('STEP 1 / 3 · 자료 등록')}
+        title={uiText('산출서와 집계표를 등록하세요')}
         description={
           selectedProject
             ? `${selectedProject.name}에 등록할 팀을 고르고 원본 자료를 업로드하세요.`
-            : '좌측 프로젝트 목록에서 자료를 등록할 프로젝트를 선택하세요.'
+            : uiText(
+                '좌측 프로젝트 목록에서 자료를 등록할 프로젝트를 선택하세요.',
+              )
         }
         action={
           <button
@@ -139,7 +144,8 @@ export function ProjectDataWorkspace({
             type="button"
             onClick={onOpenRegistration}
           >
-            프로젝트 다시 선택
+            {' '}
+            <UiText text="프로젝트 다시 선택" />{' '}
           </button>
         }
       />
@@ -157,8 +163,12 @@ export function ProjectDataWorkspace({
         <section className="project-data-locked" aria-live="polite">
           <FileSpreadsheet aria-hidden="true" />
           <div>
-            <h2>좌측 프로젝트 목록에서 프로젝트를 선택하세요.</h2>
-            <p>선택 즉시 해당 프로젝트의 자료 등록 화면이 열립니다.</p>
+            <h2>
+              <UiText text="좌측 프로젝트 목록에서 프로젝트를 선택하세요." />
+            </h2>
+            <p>
+              <UiText text="선택 즉시 해당 프로젝트의 자료 등록 화면이 열립니다." />
+            </p>
           </div>
         </section>
       ) : (
@@ -167,21 +177,29 @@ export function ProjectDataWorkspace({
           aria-labelledby="selected-project-title"
         >
           <header className="selected-project-boundary">
-            <span className="selection-label">현재 자료 저장 대상</span>
+            <span className="selection-label">
+              <UiText text="현재 자료 저장 대상" />
+            </span>
             <h2 id="selected-project-title">{selectedProject.name}</h2>
             <p>
-              아래에서 등록하는 모든 산출서와 집계표는 이 프로젝트에만
-              저장됩니다.
+              {' '}
+              <UiText text="아래에서 등록하는 모든 산출서와 집계표는 이 프로젝트에만 저장됩니다." />{' '}
             </p>
           </header>
           <div className="case-workbench">
             <div className="case-heading">
               <div>
-                <h3>등록할 팀 선택</h3>
-                <p>팀을 선택하면 산출서와 집계표를 바로 등록할 수 있습니다.</p>
+                <h3>
+                  <UiText text="등록할 팀 선택" />
+                </h3>
+                <p>
+                  <UiText text="팀을 선택하면 산출서와 집계표를 바로 등록할 수 있습니다." />
+                </p>
               </div>
               <fieldset className="team-selector">
-                <legend className="sr-only">등록할 팀</legend>
+                <legend className="sr-only">
+                  <UiText text="등록할 팀" />
+                </legend>
                 <button
                   className="team-choice team-choice--finish"
                   type="button"
@@ -194,7 +212,8 @@ export function ProjectDataWorkspace({
                   }
                   onClick={() => onCreateCase('FIN')}
                 >
-                  마감팀
+                  {' '}
+                  <UiText text="마감팀" />{' '}
                 </button>
                 <button
                   className="team-choice team-choice--structure"
@@ -208,36 +227,46 @@ export function ProjectDataWorkspace({
                   }
                   onClick={() => onCreateCase('RC')}
                 >
-                  구조팀
+                  {' '}
+                  <UiText text="구조팀" />{' '}
                 </button>
               </fieldset>
             </div>
 
             {caseState === 'loading' ? (
               <output className="case-empty">
-                팀별 저장 내역을 불러오는 중…
+                {' '}
+                <UiText text="팀별 저장 내역을 불러오는 중…" />{' '}
               </output>
             ) : caseState === 'error' ? (
               <div className="case-empty case-error" role="alert">
-                <span>팀별 저장 내역을 불러오지 못했습니다.</span>
+                <span>
+                  <UiText text="팀별 저장 내역을 불러오지 못했습니다." />
+                </span>
                 <button type="button" onClick={onRetryCases}>
-                  다시 시도
+                  {' '}
+                  <UiText text="다시 시도" />{' '}
                 </button>
               </div>
             ) : !activeCase ? (
               <p className="team-selection-hint">
-                팀을 선택하면 바로 자료를 등록할 수 있습니다.
+                {' '}
+                <UiText text="팀을 선택하면 바로 자료를 등록할 수 있습니다." />{' '}
               </p>
             ) : (
               <div className="team-storage-context">
                 <span>
-                  {activeCase.discipline === 'FIN' ? '마감팀' : '구조팀'} 자료
-                  등록
+                  {activeCase.discipline === 'FIN'
+                    ? uiText('마감팀')
+                    : uiText('구조팀')}{' '}
+                  <UiText text="자료 등록" />{' '}
                 </span>
                 <small>{caseStatusLabel(activeCase.status)}</small>
                 {teamCases.length > 1 ? (
                   <div>
-                    <label htmlFor="team-source-history">이전 자료 기록</label>
+                    <label htmlFor="team-source-history">
+                      <UiText text="이전 자료 기록" />
+                    </label>
                     <select
                       id="team-source-history"
                       aria-describedby="team-source-history-note"
@@ -252,8 +281,9 @@ export function ProjectDataWorkspace({
                       ))}
                     </select>
                     <small id="team-source-history-note">
-                      기존 {teamCases.length}개 기록을 보존했습니다. 이전 파일은
-                      해당 기록을 선택해 확인하세요.
+                      {' '}
+                      <UiText text="기존" /> {teamCases.length}
+                      <UiText text="개 기록을 보존했습니다. 이전 파일은 해당 기록을 선택해 확인하세요." />{' '}
                     </small>
                   </div>
                 ) : (
@@ -266,7 +296,7 @@ export function ProjectDataWorkspace({
               <form className="source-upload-panel" onSubmit={onUpload}>
                 <fieldset
                   className="next-step-panel"
-                  aria-label="자료 등록 상단 작업"
+                  aria-label={uiText('자료 등록 상단 작업')}
                 >
                   <span className="next-step-check" aria-hidden="true">
                     {hasStoredSources ? <Check /> : <ArrowRight />}
@@ -274,13 +304,14 @@ export function ProjectDataWorkspace({
                   <div>
                     <h5>
                       {hasStoredSources
-                        ? '저장된 자료로 AI 검수 단계로 이동하세요.'
-                        : '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.'}
+                        ? uiText('저장된 자료로 AI 검수 단계로 이동하세요.')
+                        : uiText(
+                            '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.',
+                          )}
                     </h5>
                     <p>
-                      저장에 실패했거나 미등록인 자료는 제외하고 진행합니다.
-                      검수 전 입력 매핑이 필요하며, 근거가 없는 항목은 미평가로
-                      표시합니다.
+                      {' '}
+                      <UiText text="저장에 실패했거나 미등록인 자료는 제외하고 진행합니다. 검수 전 입력 매핑이 필요하며, 근거가 없는 항목은 미평가로 표시합니다." />{' '}
                     </p>
                   </div>
                   {continueToAiReviewAction}
@@ -294,21 +325,28 @@ export function ProjectDataWorkspace({
                     }
                   >
                     <Upload aria-hidden="true" />
-                    {uploading ? '원본 저장 중' : '선택 파일 저장'}
+                    {uploading
+                      ? uiText('원본 저장 중')
+                      : uiText('선택 파일 저장')}
                   </button>
                 </fieldset>
                 <div className="source-upload-heading">
                   <div>
-                    <span className="selection-label">프로젝트 자료</span>
-                    <h4>산출서와 집계표 원본 등록</h4>
+                    <span className="selection-label">
+                      <UiText text="프로젝트 자료" />
+                    </span>
+                    <h4>
+                      <UiText text="산출서와 집계표 원본 등록" />
+                    </h4>
                     <p>
-                      XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다.
+                      {' '}
+                      <UiText text="XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다." />{' '}
                     </p>
                   </div>
                   <button
                     className="icon-button"
                     type="button"
-                    aria-label="자료 등록 닫기"
+                    aria-label={uiText('자료 등록 닫기')}
                     disabled={uploading}
                     onClick={onCloseUpload}
                   >
@@ -319,7 +357,9 @@ export function ProjectDataWorkspace({
                   className="source-upload-mode"
                   disabled={uploading || sourcePackageState !== 'ready'}
                 >
-                  <legend>자료 등록 방식</legend>
+                  <legend>
+                    <UiText text="자료 등록 방식" />
+                  </legend>
                   <label>
                     <input
                       type="radio"
@@ -327,8 +367,8 @@ export function ProjectDataWorkspace({
                       value="append"
                       checked={uploadMode === 'append'}
                       onChange={() => onUploadModeChange('append')}
-                    />
-                    추가 등록
+                    />{' '}
+                    <UiText text="추가 등록" />{' '}
                   </label>
                   <label>
                     <input
@@ -338,23 +378,26 @@ export function ProjectDataWorkspace({
                       disabled={replacementTargets.length === 0}
                       checked={uploadMode === 'replace'}
                       onChange={() => onUploadModeChange('replace')}
-                    />
-                    기존 자료 교체
+                    />{' '}
+                    <UiText text="기존 자료 교체" />{' '}
                   </label>
                   <p>
                     {uploadMode === 'replace'
                       ? `현재 자료 기록의 기존 ${replacementTargets.length}묶음을 새 파일로 교체합니다. 새 파일이 모두 저장되기 전까지 기존 자료는 유지됩니다.`
-                      : '기존 자료를 유지하고 선택한 파일을 추가합니다.'}
+                      : uiText(
+                          '기존 자료를 유지하고 선택한 파일을 추가합니다.',
+                        )}
                   </p>
                   {uploadMode === 'replace' && (
                     <details>
                       <summary>
-                        교체 대상 확인 ·{' '}
+                        {' '}
+                        <UiText text="교체 대상 확인 ·" />{' '}
                         {replacementTargets.reduce(
                           (count, item) => count + item.files.length,
                           0,
-                        )}
-                        개 파일
+                        )}{' '}
+                        <UiText text="개 파일" />{' '}
                       </summary>
                       <ul>
                         {replacementTargets.map((item) => (
@@ -371,8 +414,8 @@ export function ProjectDataWorkspace({
                         ))}
                       </ul>
                       <p>
-                        다른 팀·이전 자료 기록은 변경하지 않습니다. 교체 후 이전
-                        원본은 이력으로 보관합니다.
+                        {' '}
+                        <UiText text="다른 팀·이전 자료 기록은 변경하지 않습니다. 교체 후 이전 원본은 이력으로 보관합니다." />{' '}
                       </p>
                     </details>
                   )}
@@ -380,8 +423,12 @@ export function ProjectDataWorkspace({
                 <label className="source-file-picker">
                   <Upload aria-hidden="true" />
                   <span>
-                    <strong>산출서와 집계표 선택</strong>
-                    <small>복수 선택 가능 · 파일당 최대 20MB</small>
+                    <strong>
+                      <UiText text="산출서와 집계표 선택" />
+                    </strong>
+                    <small>
+                      <UiText text="복수 선택 가능 · 파일당 최대 20MB" />
+                    </small>
                   </span>
                   <input
                     id="source-files"
@@ -429,9 +476,13 @@ export function ProjectDataWorkspace({
                     <div>
                       <AlertTriangle aria-hidden="true" />
                       <strong id="upload-failure-title">
-                        저장하지 못한 파일
+                        {' '}
+                        <UiText text="저장하지 못한 파일" />{' '}
                       </strong>
-                      <span>{uploadFailures.length}개</span>
+                      <span>
+                        {uploadFailures.length}
+                        <UiText text="개" />
+                      </span>
                     </div>
                     <ul>
                       {uploadFailures.map((failure) => (
@@ -448,7 +499,8 @@ export function ProjectDataWorkspace({
                       ))}
                     </ul>
                     <label className="retry-file-picker" htmlFor="source-files">
-                      실패 파일 다시 선택
+                      {' '}
+                      <UiText text="실패 파일 다시 선택" />{' '}
                     </label>
                   </section>
                 )}
@@ -458,26 +510,37 @@ export function ProjectDataWorkspace({
                 >
                   <div className="source-package-history-heading">
                     <div>
-                      <span className="selection-label">서버 저장 내역</span>
+                      <span className="selection-label">
+                        <UiText text="서버 저장 내역" />
+                      </span>
                       <h5 id="source-package-history-title">
-                        등록된 자료 묶음
+                        {' '}
+                        <UiText text="등록된 자료 묶음" />{' '}
                       </h5>
                     </div>
                     {sourcePackageState === 'ready' && (
-                      <span>{currentPackages.length}건</span>
+                      <span>
+                        {currentPackages.length}
+                        <UiText text="건" />
+                      </span>
                     )}
                   </div>
                   {sourcePackageState === 'loading' ? (
-                    <output aria-live="polite">저장 내역을 확인하는 중…</output>
+                    <output aria-live="polite">
+                      <UiText text="저장 내역을 확인하는 중…" />
+                    </output>
                   ) : sourcePackageState === 'error' ? (
                     <div className="source-package-history-error" role="alert">
                       <span>{sourcePackageError}</span>
                       <button type="button" onClick={onRetryPackages}>
-                        저장 내역 다시 불러오기
+                        {' '}
+                        <UiText text="저장 내역 다시 불러오기" />{' '}
                       </button>
                     </div>
                   ) : currentPackages.length === 0 ? (
-                    <p>이 팀에 저장된 산출서와 집계표가 아직 없습니다.</p>
+                    <p>
+                      <UiText text="이 팀에 저장된 산출서와 집계표가 아직 없습니다." />
+                    </p>
                   ) : (
                     <ul className="source-package-list">
                       {currentPackages.map((sourcePackage) => {
@@ -492,15 +555,15 @@ export function ProjectDataWorkspace({
                                 className={`package-status ${isPendingReplacement(sourcePackage) ? 'is-pending' : packageStatusToneClass(sourcePackage.status)}`}
                               >
                                 {isPendingReplacement(sourcePackage)
-                                  ? '교체 대기 · 기존 자료 유지'
+                                  ? uiText('교체 대기 · 기존 자료 유지')
                                   : packageStatusLabel(sourcePackage.status)}
                               </span>
                               <small>
-                                {storedCount}/{sourcePackage.files.length}개
-                                저장
-                                {' · 등록 시작 '}
+                                {storedCount}/{sourcePackage.files.length}
+                                <UiText text="개 저장" />{' '}
+                                {uiText(' · 등록 시작 ')}
                                 {formatRegisteredAt(sourcePackage.createdAt)}
-                                {' · 묶음 '}
+                                {uiText(' · 묶음 ')}
                                 {sourcePackage.id.slice(0, 8)}
                               </small>
                               {isPendingReplacement(sourcePackage) &&
@@ -513,7 +576,8 @@ export function ProjectDataWorkspace({
                                       onApplyReplacement(sourcePackage)
                                     }
                                   >
-                                    교체 적용
+                                    {' '}
+                                    <UiText text="교체 적용" />{' '}
                                   </button>
                                 )}
                               {canArchiveSourcePackage(sourcePackage) && (
@@ -530,8 +594,8 @@ export function ProjectDataWorkspace({
                                 >
                                   <Trash2 aria-hidden="true" />
                                   {deletingSourcePackageId === sourcePackage.id
-                                    ? '삭제 중…'
-                                    : '삭제'}
+                                    ? uiText('삭제 중…')
+                                    : uiText('삭제')}
                                 </button>
                               )}
                             </div>
@@ -562,8 +626,10 @@ export function ProjectDataWorkspace({
                 {previousPackages.length > 0 && (
                   <details className="source-previous-history">
                     <summary>
-                      교체된 이전 자료 · {previousPackages.length}묶음 (검수
-                      대상 제외)
+                      {' '}
+                      <UiText text="교체된 이전 자료 ·" />{' '}
+                      {previousPackages.length}
+                      <UiText text="묶음 (검수 대상 제외)" />{' '}
                     </summary>
                     <ul>
                       {previousPackages.map((item) => (
@@ -589,7 +655,8 @@ export function ProjectDataWorkspace({
                     disabled={uploading}
                     onClick={onCloseUpload}
                   >
-                    취소
+                    {' '}
+                    <UiText text="취소" />{' '}
                   </button>
                   <button
                     className="primary-action"
@@ -603,10 +670,10 @@ export function ProjectDataWorkspace({
                     {uploading
                       ? `검사·저장 중 (${uploadCompletedCount}/${sourceFiles.length})`
                       : uploadMode === 'replace'
-                        ? '원본 검사 후 교체'
+                        ? uiText('원본 검사 후 교체')
                         : uploadStatus === 'error'
-                          ? '원본 검사 후 다시 저장'
-                          : '원본 검사 후 저장'}
+                          ? uiText('원본 검사 후 다시 저장')
+                          : uiText('원본 검사 후 저장')}
                   </button>
                 </div>
               </form>

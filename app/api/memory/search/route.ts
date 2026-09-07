@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -31,8 +31,8 @@ const inputSchema = z.object({
 export async function POST(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const input = inputSchema.parse(await readJson(request));

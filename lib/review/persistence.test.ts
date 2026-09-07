@@ -15,7 +15,7 @@ function database() {
       else db.exec(statement);
     }
   db.exec(
-    "INSERT INTO user_profile VALUES ('u','synthetic@example.invalid','Synthetic',0); INSERT INTO project VALUES ('p','P','합성 시험',NULL,'active','u',0); INSERT INTO project_member VALUES ('m','p','u','project_owner',0); INSERT INTO review_case VALUES ('c','p','마감팀','FIN','draft','u',NULL,NULL,0);",
+    "INSERT INTO user_profile VALUES ('u','yjw@con-cost.com','Synthetic administrator fixture',0); INSERT INTO project VALUES ('p','P','합성 시험',NULL,'active','u',0); INSERT INTO project_member VALUES ('m','p','u','project_owner',0); INSERT INTO review_case VALUES ('c','p','마감팀','FIN','draft','u',NULL,NULL,0);",
   );
   return db;
 }
@@ -27,6 +27,9 @@ describe('review SQLite guards', () => {
       try {
         db.exec(
           "INSERT INTO qc_profile_version VALUES ('v','p',1,'{}','u','now'); INSERT INTO qc_review_run VALUES ('trial','p','c','v',1,1,'trialkey','hash',1,1,'u','now');",
+        );
+        db.exec(
+          "UPDATE user_profile SET email='staff@example.invalid' WHERE id='u'",
         );
         db.prepare('UPDATE project_member SET role=? WHERE id=?').run(
           role,

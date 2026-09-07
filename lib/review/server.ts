@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getD1Binding } from '@/db';
 import type { Actor, ProjectRole } from '@/lib/domain/contracts';
 import { can } from '@/lib/domain/permissions';
+import { isApplicationAdmin } from '@/lib/auth/administrators';
 import { getPrivateFileStorage } from '@/lib/files/r2-factory';
 import { D1SourcePackageRepository } from '@/lib/ingestion/d1-repository';
 import { hasUsableStoredSources } from '@/lib/ingestion/document-checklist';
@@ -23,8 +24,20 @@ import {
   WorkbookError,
 } from './workbook';
 import { reviewRows } from './engine';
+import { BaselineService, basicStatus } from './baseline-server';
+import { unpackEvidence } from './baseline';
 
 export const reviewRequestSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('start-basic'),
+    caseId: z.uuid(),
+    requestKey: z.uuid(),
+  }),
+  z.object({
+    action: z.literal('continue-basic'),
+    caseId: z.uuid(),
+    jobId: z.uuid(),
+  }),
   z.object({
     action: z.literal('inspect'),
     caseId: z.uuid(),
@@ -96,7 +109,7 @@ export class ReviewService {
       );
     if (write && !can(row.role as ProjectRole, 'finding:triage'))
       fail(403, 'REVIEW_WRITE_DENIED', '검수 변경 권한이 없습니다.');
-    if (approve && !can(row.role as ProjectRole, 'rule:manage'))
+    if (approve && !isApplicationAdmin(actor.email))
       fail(
         403,
         'APPROVAL_DENIED',
@@ -139,8 +152,8 @@ export class ReviewService {
     projectId: string,
     caseId: string,
   ): Promise<ReviewState> {
-    const member = await this.authorize(actor, projectId, caseId);
-    const admin = can(member.role as ProjectRole, 'rule:manage');
+    await this.authorize(actor, projectId, caseId);
+    const admin = isApplicationAdmin(actor.email);
     const sources = await this.sources(actor, projectId, caseId);
     const profiles = await this.db
       .prepare(
@@ -174,8 +187,27 @@ export class ReviewService {
       )
       .bind(projectId, caseId)
       .first<{ id: string; mappings_json: string }>();
+    const basicRuns = await this.db
+      .prepare(
+        `SELECT id,created_at,finding_count,row_count FROM qc_basic_run WHERE project_id=? AND case_id=? ORDER BY created_at DESC LIMIT 30`,
+      )
+      .bind(projectId, caseId)
+      .all<{
+        id: string;
+        created_at: string;
+        finding_count: number;
+        row_count: number;
+      }>();
+    const pending = await this.db
+      .prepare(
+        `SELECT * FROM qc_basic_job WHERE project_id=? AND case_id=? AND actor_id=? AND state='running' ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(projectId, caseId, actor.id)
+      .first<Parameters<typeof basicStatus>[0]>();
     return {
       sources,
+      canManageGuidelines: admin,
+      pendingJob: pending ? basicStatus(pending) : null,
       mappingVersionId: mapping?.id ?? null,
       profiles: profiles.results
         .filter((p) => admin || p.approval_id)
@@ -187,16 +219,27 @@ export class ReviewService {
           createdAt: p.created_at,
           trialRunId: admin ? p.trial_run_id : null,
         })),
-      runs: runs.results
-        .filter((r) => admin || !r.trial)
-        .map((r) => ({
+      runs: [
+        ...runs.results
+          .filter((r) => admin || !r.trial)
+          .map((r) => ({
+            id: r.id,
+            createdAt: r.created_at,
+            profileVersion: r.profile_version,
+            trial: !!r.trial,
+            findingCount: r.finding_count,
+            rowCount: r.row_count,
+          })),
+        ...basicRuns.results.map((r) => ({
           id: r.id,
           createdAt: r.created_at,
-          profileVersion: r.profile_version,
-          trial: !!r.trial,
+          profileVersion: 1,
+          trial: false,
+          kind: 'baseline' as const,
           findingCount: r.finding_count,
           rowCount: r.row_count,
         })),
+      ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       mappings: mapping
         ? z
             .array(mappingSchema)
@@ -207,11 +250,7 @@ export class ReviewService {
         : [],
     };
   }
-  private async readSource(
-    projectId: string,
-    caseId: string,
-    source: ReviewSource,
-  ) {
+  async readSource(projectId: string, caseId: string, source: ReviewSource) {
     const stored = await getPrivateFileStorage().getSourceFile({
       projectId,
       caseId,
@@ -310,17 +349,27 @@ export class ReviewService {
     caseId: string,
     runId: string,
   ): Promise<{ run: Run; decisions: Decision[] }> {
-    const member = await this.authorize(actor, projectId, caseId);
+    await this.authorize(actor, projectId, caseId);
     z.uuid().parse(runId);
-    const record = await this.db
+    const legacyRecord = await this.db
       .prepare(
         'SELECT object_key,sha256,trial FROM qc_review_run WHERE id=? AND project_id=? AND case_id=?',
       )
       .bind(runId, projectId, caseId)
       .first<{ object_key: string; sha256: string; trial: number }>();
+    const basicRecord = legacyRecord
+      ? null
+      : await this.db
+          .prepare(
+            'SELECT object_key,sha256 FROM qc_basic_run WHERE id=? AND project_id=? AND case_id=?',
+          )
+          .bind(runId, projectId, caseId)
+          .first<{ object_key: string; sha256: string }>();
+    const record =
+      legacyRecord ?? (basicRecord ? { ...basicRecord, trial: 0 } : null);
     if (!record || !env.FILES)
       fail(404, 'RUN_NOT_FOUND', '저장된 검수 실행을 찾지 못했습니다.');
-    if (record.trial && !can(member.role as ProjectRole, 'rule:manage'))
+    if (record.trial && !isApplicationAdmin(actor.email))
       fail(
         403,
         'RULE_ADMIN_REQUIRED',
@@ -332,7 +381,9 @@ export class ReviewService {
     const bytes = await object.arrayBuffer();
     if ((await sha(bytes)) !== record.sha256)
       fail(409, 'RUN_INTEGRITY', '검수 근거 해시가 일치하지 않습니다.');
-    const run = JSON.parse(new TextDecoder().decode(bytes)) as Run;
+    const run = unpackEvidence<Run>(
+      JSON.parse(new TextDecoder().decode(bytes)),
+    );
     if (
       run.projectId !== projectId ||
       run.caseId !== caseId ||
@@ -341,7 +392,7 @@ export class ReviewService {
       fail(409, 'RUN_SCOPE', '검수 근거 범위가 일치하지 않습니다.');
     const decisions = await this.db
       .prepare(
-        'SELECT id,finding_id,disposition,reason,actor_id,created_at FROM qc_review_decision WHERE project_id=? AND run_id=? ORDER BY created_at ASC,id ASC',
+        `SELECT id,finding_id,disposition,reason,actor_id,created_at FROM ${basicRecord ? 'qc_basic_decision' : 'qc_review_decision'} WHERE project_id=? AND run_id=? ORDER BY created_at ASC,id ASC`,
       )
       .bind(projectId, runId)
       .all<{
@@ -381,12 +432,29 @@ export class ReviewService {
         (input.action === 'run' && input.trial),
     );
     if (
-      ['mapping', 'profile', 'run'].includes(input.action) &&
+      ['mapping', 'profile', 'run', 'start-basic', 'continue-basic'].includes(
+        input.action,
+      ) &&
       !can(member.role as ProjectRole, 'review:run')
     )
       fail(403, 'REVIEW_RUN_DENIED', '매핑·지침 작성·실행 권한이 없습니다.');
     if (input.action === 'inspect')
       return this.inspect(actor, projectId, caseId, input.sourceVersionId);
+    if (input.action === 'start-basic')
+      return new BaselineService(this).start(
+        actor,
+        projectId,
+        caseId,
+        input.requestKey,
+      );
+    if (input.action === 'continue-basic')
+      return new BaselineService(this).continue(
+        actor,
+        projectId,
+        caseId,
+        input.jobId,
+        requestId,
+      );
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     if (input.action === 'mapping') {
@@ -533,7 +601,9 @@ export class ReviewService {
         id,
         'review.decision.recorded',
         this.db
-          .prepare('INSERT INTO qc_review_decision VALUES (?,?,?,?,?,?,?,?)')
+          .prepare(
+            `INSERT INTO ${run.kind === 'baseline' ? 'qc_basic_decision' : 'qc_review_decision'} VALUES (?,?,?,?,?,?,?,?)`,
+          )
           .bind(
             id,
             projectId,

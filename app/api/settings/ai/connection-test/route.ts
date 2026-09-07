@@ -1,7 +1,8 @@
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
+import { isApplicationAdmin } from '@/lib/auth/administrators';
 import type {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
@@ -21,10 +22,16 @@ import {
 export async function POST(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
-    actorFromHeaders(request.headers, runtimeMode(), {
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
+    if (!isApplicationAdmin(actor.email))
+      throw new AuthenticationError(
+        'AI 연결 시험은 관리자만 실행할 수 있습니다.',
+        'ADMIN_REQUIRED',
+        403,
+      );
     const result = await testGeminiConnection();
     const body: ApiSuccessEnvelope<typeof result> = {
       data: result,

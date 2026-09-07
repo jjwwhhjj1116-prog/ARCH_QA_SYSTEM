@@ -159,6 +159,8 @@ export type RuleCoverage = {
   reasons: string[];
 };
 export type Run = {
+  kind?: 'baseline';
+  rowCount?: number;
   id: string;
   projectId: string;
   caseId: string;
@@ -186,7 +188,7 @@ export type ProfileVersion = {
 };
 export type RunSummary = Pick<
   Run,
-  'id' | 'createdAt' | 'profileVersion' | 'trial'
+  'id' | 'createdAt' | 'profileVersion' | 'trial' | 'kind'
 > & { findingCount: number; rowCount: number };
 export type Decision = {
   id: string;
@@ -204,11 +206,22 @@ export type ReviewSource = {
   packageId: string;
 };
 export type ReviewState = {
+  canManageGuidelines?: boolean;
+  pendingJob?: BasicJobStatus | null;
   mappingVersionId: string | null;
   sources: ReviewSource[];
   profiles: ProfileVersion[];
   runs: RunSummary[];
   mappings: Mapping[];
+};
+export type BasicJobStatus = {
+  id: string;
+  state: 'running' | 'completed' | 'failed';
+  completedFiles: number;
+  totalFiles: number;
+  currentFile: string | null;
+  stage: 'files' | 'results' | 'completed' | 'failed';
+  error: string | null;
 };
 export type Inspection = {
   source: ReviewSource;

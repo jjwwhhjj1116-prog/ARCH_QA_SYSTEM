@@ -1,5 +1,19 @@
 # Decision Log
 
+## 2026-09-07 — D-019 Employee workstation and product baseline
+
+[ADR-009](adr/ADR-009-employee-workstation.md) supersedes project-owner guideline
+administration: only yjw@con-cost.com and yjpark@con-cost.com qualify, in addition
+to project membership. Employee authentication remains feature-flagged OFF until
+the audience and account/project transition are approved. Current Sites identity
+and owner-only access remain active; existing identities/history are not reassigned.
+
+Whole-source product baseline is the primary top action, independent of approved
+guidelines. Approved guideline review remains separate. File-by-file progress and
+immutable baseline results use additive migrations 0007/0008. UI preferences add
+KO/VI and a 220–380px sidebar. See the [v15 build notes](qa/2026-09-07-employee-workstation-v15.md)
+for verification, scope limits, activation and rollback. No audience expansion is authorized.
+
 ## 2026-09-07 — Review preparation and admin-only guideline settings
 
 ADR-008 supersedes the normal-workflow guideline tab and per-sheet standard-header

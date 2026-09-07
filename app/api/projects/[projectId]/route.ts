@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -34,10 +34,10 @@ export async function DELETE(
 ): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
     const { projectId: rawProjectId } = await context.params;
     const projectId = opaqueIdSchema.parse(rawProjectId);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const project = await service.archive(

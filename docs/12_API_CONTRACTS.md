@@ -417,6 +417,19 @@ Protected or minimally revealing output includes:
 - See [ADR-006](adr/ADR-006-source-package-replacement.md) for migration and
   rollback constraints. This extension is not workbook parsing or AI execution.
 
+### Employee workstation extension (2026-09-07)
+
+Feature-flagged `/api/auth/login` and `/api/auth/logout` accept same-origin POST;
+`/api/auth/session` returns only the signed-in display identity/admin flag, no
+credential data. All return no-store; disabled employee auth fails closed.
+The exact two administrator emails do not replace project membership checks.
+
+Project review adds `start-basic` with a caller idempotency key and `continue-basic`
+with a job ID, plus baseline-aware saved-run retrieval and decision persistence.
+Source/mapping/engine snapshot and per-file progress are persisted; existing
+approved-profile actions remain distinct. See ADR-009 and v15 build notes for
+limits, identity transition, deployment gate and migration 0007/0008.
+
 ### Verification
 
 - request/response schema validation;

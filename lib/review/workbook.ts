@@ -11,7 +11,7 @@ import {
   type SourceRef,
 } from './contracts';
 
-const MAX_ROWS = 12000;
+const MAX_ROWS = 50000;
 const list = <T>(v: T | T[] | undefined): T[] =>
   v === undefined ? [] : Array.isArray(v) ? v : [v];
 // Decode standard XML escapes only; DTD/entity declarations are rejected before parsing.
@@ -108,7 +108,7 @@ export function parseCsv(text: string): Sheet {
     } else cell += char;
     if (cell.length > 8192 || record.length > 255 || records.length > MAX_ROWS)
       throw new WorkbookError(
-        '검수 한도(12,000행·256열·셀 8KB)를 넘었습니다. 파일을 나눠 주세요.',
+        '검수 한도(50,000행·256열·셀 8KB)를 넘었습니다. 파일을 나눠 주세요.',
       );
   }
   if (quoted) throw new WorkbookError('CSV 따옴표가 닫히지 않았습니다.');
@@ -255,9 +255,9 @@ export function readWorkbook(
                 ? '=' + stringValue(c.f)
                 : stringValue(c.v);
         cellBytes += new TextEncoder().encode(value).byteLength;
-        if (cellBytes > 4 * 1024 * 1024)
+        if (cellBytes > 8 * 1024 * 1024)
           throw new WorkbookError(
-            '공유 문자열을 펼친 셀 내용이 검수 한도 4MB를 넘었습니다. 원본은 보존됩니다.',
+            '공유 문자열을 펼친 셀 내용이 검수 한도 8MB를 넘었습니다. 원본은 보존됩니다.',
           );
         if (value.length > 8192)
           throw new WorkbookError('셀 내용이 검수 한도를 넘었습니다.');
@@ -268,7 +268,7 @@ export function readWorkbook(
       if (!cells.some((c) => c)) return;
       if (++rowTotal > MAX_ROWS)
         throw new WorkbookError(
-          '내용이 있는 12,000행 한도를 넘었습니다. 일부만 정상 처리하지 않습니다.',
+          '파일당 내용이 있는 50,000행 한도를 넘었습니다. 일부만 정상 처리하지 않습니다.',
         );
       result.rows.push({
         number: rowNumber,
@@ -389,84 +389,88 @@ export function canonicalRows(
   mapping: Mapping,
   source: Omit<SourceRef, 'sheet' | 'row' | 'cell'>,
 ): CanonicalRow[] {
-  if (!mapping.confirmed) return [];
+  return [...iterateCanonicalRows(sheet, mapping, source)];
+}
+export function* iterateCanonicalRows(
+  sheet: Sheet,
+  mapping: Mapping,
+  source: Omit<SourceRef, 'sheet' | 'row' | 'cell'>,
+): Generator<CanonicalRow> {
+  if (!mapping.confirmed) return;
   let tradeContext = '';
   let tradeRow = 0;
-  return sheet.rows
-    .filter(
-      (r) => r.number > mapping.headerRow && r.cells.some((c) => c.trim()),
+  for (const row of sheet.rows) {
+    if (row.number <= mapping.headerRow || !row.cells.some((c) => c.trim()))
+      continue;
+    const values = Object.fromEntries(
+      fields.map((f) => [
+        f,
+        mapping.columns[f] === null
+          ? ''
+          : (row.cells[mapping.columns[f]!] ?? ''),
+      ]),
+    ) as Record<Field, string>;
+    const populated = row.cells.filter((c) => c.trim());
+    let excluded: string | null = null;
+    if (row.hidden) excluded = '숨김 행 · 검토 범위 확인 필요';
+    const tradeHeader =
+      mapping.kind === 'building-summary' &&
+      /^\d{2}$/u.test(values.code.trim()) &&
+      /공사|공종/u.test(values.item) &&
+      !values.unit.trim() &&
+      !values.spec.trim();
+    if (tradeHeader) {
+      tradeContext = values.item.trim();
+      tradeRow = row.number;
+      excluded = '공종 구분행 · 이후 아이템의 공종 문맥';
+    } else if (
+      mapping.kind === 'building-summary' &&
+      !values.trade &&
+      tradeContext
     )
-    .map((row) => {
-      const values = Object.fromEntries(
-        fields.map((f) => [
-          f,
-          mapping.columns[f] === null
-            ? ''
-            : (row.cells[mapping.columns[f]!] ?? ''),
-        ]),
-      ) as Record<Field, string>;
-      const populated = row.cells.filter((c) => c.trim());
-      let excluded: string | null = null;
-      if (row.hidden) excluded = '숨김 행 · 검토 범위 확인 필요';
-      const tradeHeader =
-        mapping.kind === 'building-summary' &&
-        /^\d{2}$/u.test(values.code.trim()) &&
-        /공사|공종/u.test(values.item) &&
-        !values.unit.trim() &&
-        !values.spec.trim();
-      if (tradeHeader) {
-        tradeContext = values.item.trim();
-        tradeRow = row.number;
-        excluded = '공종 구분행 · 이후 아이템의 공종 문맥';
-      } else if (
-        mapping.kind === 'building-summary' &&
-        !values.trade &&
-        tradeContext
-      )
-        values.trade = tradeContext;
-      if (
-        /^조적산출서(?:[(_（]|\.)/u.test(source.filename) ||
-        /^(조적|벽돌|블록)공사$/u.test(clean(values.trade))
-      )
-        excluded = 'MASONRY_SCOPE · 조적 후속 범위';
-      else if (
-        /^(소계|합계|총계|공종계|층계|동계)$/u.test(clean(values.item)) ||
-        populated.some((c) => /^(소계|총계)$/u.test(clean(c)))
-      )
-        excluded = '소계·총계 · 상세행 이중 합산 제외';
-      else if (!values.item.trim())
-        excluded = '품명 없는 문맥·변수 행 · 상세항목 미확정';
-      else if (aliases.item.some((a) => clean(a) === clean(values.item)))
-        excluded = '반복 머리글';
-      else if (/^\[?비고\]?$/u.test(clean(values.item)))
-        excluded = '비고 문맥행';
-      const fieldRefs = Object.fromEntries(
-        fields
-          .filter((f) => mapping.columns[f] !== null)
-          .map((f) => [f, columnName(mapping.columns[f]!) + row.number]),
-      );
-      if (mapping.columns.trade === null && values.trade && tradeRow)
-        fieldRefs.trade = columnName(mapping.columns.item ?? 0) + tradeRow;
-      return {
-        id: `${source.sourceVersionId}:${sheet.name}:${row.number}`,
-        ref: {
-          ...source,
-          sheet: sheet.name,
-          row: row.number,
-          cell:
-            columnName(
-              mapping.columns.formula ??
-                mapping.columns.quantity ??
-                mapping.columns.item ??
-                0,
-            ) + row.number,
-        },
-        values,
-        original: row.cells,
-        kind: mapping.kind,
-        mapping,
-        excluded,
-        fieldRefs,
-      };
-    });
+      values.trade = tradeContext;
+    if (
+      /^조적산출서(?:[(_（]|\.)/u.test(source.filename) ||
+      /^(조적|벽돌|블록)공사$/u.test(clean(values.trade))
+    )
+      excluded = 'MASONRY_SCOPE · 조적 후속 범위';
+    else if (
+      /^(소계|합계|총계|공종계|층계|동계)$/u.test(clean(values.item)) ||
+      populated.some((c) => /^(소계|총계)$/u.test(clean(c)))
+    )
+      excluded = '소계·총계 · 상세행 이중 합산 제외';
+    else if (!values.item.trim())
+      excluded = '품명 없는 문맥·변수 행 · 상세항목 미확정';
+    else if (aliases.item.some((a) => clean(a) === clean(values.item)))
+      excluded = '반복 머리글';
+    else if (/^\[?비고\]?$/u.test(clean(values.item))) excluded = '비고 문맥행';
+    const fieldRefs = Object.fromEntries(
+      fields
+        .filter((f) => mapping.columns[f] !== null)
+        .map((f) => [f, columnName(mapping.columns[f]!) + row.number]),
+    );
+    if (mapping.columns.trade === null && values.trade && tradeRow)
+      fieldRefs.trade = columnName(mapping.columns.item ?? 0) + tradeRow;
+    yield {
+      id: `${source.sourceVersionId}:${sheet.name}:${row.number}`,
+      ref: {
+        ...source,
+        sheet: sheet.name,
+        row: row.number,
+        cell:
+          columnName(
+            mapping.columns.formula ??
+              mapping.columns.quantity ??
+              mapping.columns.item ??
+              0,
+          ) + row.number,
+      },
+      values,
+      original: row.cells,
+      kind: mapping.kind,
+      mapping,
+      excluded,
+      fieldRefs,
+    };
+  }
 }

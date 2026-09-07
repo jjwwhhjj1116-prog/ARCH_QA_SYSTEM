@@ -76,3 +76,13 @@ function safeDecode(value: string): string | null {
     return null;
   }
 }
+
+export async function authenticateRequest(
+  ...args: Parameters<typeof actorFromHeaders>
+): Promise<Actor> {
+  if (process.env.EMPLOYEE_LOGIN_ENABLED === 'true') {
+    const { employeeActor } = await import('./employee-server');
+    return employeeActor(args[0]);
+  }
+  return actorFromHeaders(...args);
+}

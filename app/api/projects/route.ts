@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -24,7 +24,7 @@ const service = new ProjectService(new D1ProjectRepository());
 export async function GET(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const projects = await service.list(actor);
@@ -37,8 +37,8 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const input = (await readJson(request)) as CreateProjectInput;

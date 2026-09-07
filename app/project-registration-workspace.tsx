@@ -1,4 +1,6 @@
 'use client';
+import { UiText, useUiText } from './ui-translation';
+
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The single tabindex enables keyboard scrolling of the wide project table, required by WCAG 2.1.1. */
 
 import {
@@ -53,6 +55,7 @@ export function ProjectRegistrationWorkspace({
   onSelectAndContinue,
   onRequestArchive,
 }: Props) {
+  const uiText = useUiText();
   return (
     <section
       className="project-workspace stage-workspace"
@@ -60,16 +63,18 @@ export function ProjectRegistrationWorkspace({
       aria-labelledby="page-title"
     >
       <StageHeading
-        eyebrow="PROJECT WORKSPACE · 프로젝트 관리"
-        title="검수 프로젝트를 선택하세요"
-        description="ERP 그룹웨어와 동일한 프로젝트명으로 등록한 뒤, 선택한 프로젝트의 자료 등록 단계로 이동합니다."
+        eyebrow={uiText('PROJECT WORKSPACE · 프로젝트 관리')}
+        title={uiText('검수 프로젝트를 선택하세요')}
+        description={uiText(
+          'ERP 그룹웨어와 동일한 프로젝트명으로 등록한 뒤, 선택한 프로젝트의 자료 등록 단계로 이동합니다.',
+        )}
         action={
           <button
             className="primary-action"
             type="button"
             onClick={onToggleCreate}
           >
-            <Plus aria-hidden="true" /> 새 프로젝트 등록
+            <Plus aria-hidden="true" /> <UiText text="새 프로젝트 등록" />{' '}
           </button>
         }
       />
@@ -83,7 +88,8 @@ export function ProjectRegistrationWorkspace({
         <span>{message}</span>
         {loadState === 'error' && (
           <button type="button" onClick={onRetry}>
-            다시 시도
+            {' '}
+            <UiText text="다시 시도" />{' '}
           </button>
         )}
       </output>
@@ -99,15 +105,18 @@ export function ProjectRegistrationWorkspace({
       <div className="project-toolbar">
         <label className="search-field">
           <Search aria-hidden="true" />
-          <span className="sr-only">프로젝트 검색</span>
+          <span className="sr-only">
+            <UiText text="프로젝트 검색" />
+          </span>
           <input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="프로젝트명·발주처 검색"
+            placeholder={uiText('프로젝트명·발주처 검색')}
           />
         </label>
         <div className="project-count">
-          <strong>{visibleProjects.length}</strong>개 표시
+          <strong>{visibleProjects.length}</strong>
+          <UiText text="개 표시" />{' '}
         </div>
       </div>
 
@@ -119,9 +128,12 @@ export function ProjectRegistrationWorkspace({
             <FileCheck2 />
           </div>
           <div>
-            <h2>첫 검수 프로젝트를 등록하세요</h2>
+            <h2>
+              <UiText text="첫 검수 프로젝트를 등록하세요" />
+            </h2>
             <p>
-              프로젝트를 만든 다음 별도 화면에서 산출서와 집계표를 등록합니다.
+              {' '}
+              <UiText text="프로젝트를 만든 다음 별도 화면에서 산출서와 집계표를 등록합니다." />{' '}
             </p>
           </div>
           <button
@@ -129,17 +141,19 @@ export function ProjectRegistrationWorkspace({
             type="button"
             onClick={onToggleCreate}
           >
-            <Plus aria-hidden="true" /> 프로젝트 등록
+            <Plus aria-hidden="true" /> <UiText text="프로젝트 등록" />{' '}
           </button>
           <ul>
             <li>
-              <Check aria-hidden="true" /> 프로젝트별 원본 격리
+              <Check aria-hidden="true" />{' '}
+              <UiText text="프로젝트별 원본 격리" />{' '}
             </li>
             <li>
-              <Check aria-hidden="true" /> 프로젝트 혼합 차단
+              <Check aria-hidden="true" />{' '}
+              <UiText text="프로젝트 혼합 차단" />{' '}
             </li>
             <li>
-              <Check aria-hidden="true" /> 검수 계보 기록
+              <Check aria-hidden="true" /> <UiText text="검수 계보 기록" />{' '}
             </li>
           </ul>
         </div>
@@ -148,20 +162,33 @@ export function ProjectRegistrationWorkspace({
         <section
           className="project-table-wrap"
           tabIndex={0}
-          aria-label="프로젝트 목록 표"
+          aria-label={uiText('프로젝트 목록 표')}
         >
           <table className="project-table">
             <caption className="sr-only">
-              접근 가능한 검수 프로젝트 목록
+              {' '}
+              <UiText text="접근 가능한 검수 프로젝트 목록" />{' '}
             </caption>
             <thead>
               <tr>
-                <th scope="col">프로젝트</th>
-                <th scope="col">역할</th>
-                <th scope="col">진행 검수</th>
-                <th scope="col">확인 필요</th>
-                <th scope="col">다음 단계</th>
-                <th scope="col">관리</th>
+                <th scope="col">
+                  <UiText text="프로젝트" />
+                </th>
+                <th scope="col">
+                  <UiText text="역할" />
+                </th>
+                <th scope="col">
+                  <UiText text="진행 검수" />
+                </th>
+                <th scope="col">
+                  <UiText text="확인 필요" />
+                </th>
+                <th scope="col">
+                  <UiText text="다음 단계" />
+                </th>
+                <th scope="col">
+                  <UiText text="관리" />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -169,20 +196,24 @@ export function ProjectRegistrationWorkspace({
                 <tr key={project.id}>
                   <td>
                     <strong>{project.name}</strong>
-                    <span>{project.clientName || 'ERP 연동 대기'}</span>
+                    <span>{project.clientName || uiText('ERP 연동 대기')}</span>
                   </td>
                   <td>
                     <span className="role-badge">
                       {roleLabel(project.role)}
                     </span>
                   </td>
-                  <td>{project.openCaseCount}건</td>
+                  <td>
+                    {project.openCaseCount}
+                    <UiText text="건" />
+                  </td>
                   <td
                     className={
                       project.needsAttentionCount > 0 ? 'attention' : ''
                     }
                   >
-                    {project.needsAttentionCount}건
+                    {project.needsAttentionCount}
+                    <UiText text="건" />{' '}
                   </td>
                   <td>
                     <button
@@ -190,7 +221,9 @@ export function ProjectRegistrationWorkspace({
                       type="button"
                       onClick={() => onSelectAndContinue(project.id)}
                     >
-                      선택하고 자료 등록 <ChevronRight aria-hidden="true" />
+                      {' '}
+                      <UiText text="선택하고 자료 등록" />{' '}
+                      <ChevronRight aria-hidden="true" />
                     </button>
                   </td>
                   <td>
@@ -204,8 +237,8 @@ export function ProjectRegistrationWorkspace({
                       >
                         <Trash2 aria-hidden="true" />
                         {archivingProjectId === project.id
-                          ? '삭제 중…'
-                          : '삭제'}
+                          ? uiText('삭제 중…')
+                          : uiText('삭제')}
                       </button>
                     )}
                   </td>
@@ -215,7 +248,8 @@ export function ProjectRegistrationWorkspace({
           </table>
           {visibleProjects.length === 0 && (
             <p className="no-search-result">
-              검색 조건에 맞는 프로젝트가 없습니다.
+              {' '}
+              <UiText text="검색 조건에 맞는 프로젝트가 없습니다." />{' '}
             </p>
           )}
         </section>
@@ -237,24 +271,27 @@ export function ProjectCreationForm({
   compact?: boolean;
   error?: string;
 }) {
+  const uiText = useUiText();
   return (
     <form
-      aria-label="새 프로젝트 등록"
+      aria-label={uiText('새 프로젝트 등록')}
       className={`create-project-panel${compact ? ' sidebar-create-project' : ''}`}
       onSubmit={onCreateProject}
     >
       <div className="form-heading">
         <div>
-          <h2>새 프로젝트 등록</h2>
+          <h2>
+            <UiText text="새 프로젝트 등록" />
+          </h2>
           <p>
-            프로젝트 코드는 입력하지 않습니다. ERP와 같은 프로젝트명을
-            사용하세요.
+            {' '}
+            <UiText text="프로젝트 코드는 입력하지 않습니다. ERP와 같은 프로젝트명을 사용하세요." />{' '}
           </p>
         </div>
         <button
           className="icon-button"
           type="button"
-          aria-label="등록 화면 닫기"
+          aria-label={uiText('등록 화면 닫기')}
           disabled={submitting}
           onClick={onToggleCreate}
         >
@@ -263,23 +300,28 @@ export function ProjectCreationForm({
       </div>
       <div className="form-grid">
         <label>
-          프로젝트명
+          {' '}
+          <UiText text="프로젝트명" />{' '}
           <input
             name="name"
             disabled={submitting}
             required
             minLength={2}
             maxLength={120}
-            placeholder="예: 덕천3구역 재건축"
+            placeholder={uiText('예: 덕천3구역 재건축')}
           />
         </label>
         <label>
-          발주처·고객사 <span>(선택)</span>
+          {' '}
+          <UiText text="발주처·고객사" />{' '}
+          <span>
+            <UiText text="(선택)" />
+          </span>
           <input
             name="clientName"
             disabled={submitting}
             maxLength={120}
-            placeholder="예: 한화건설"
+            placeholder={uiText('예: 한화건설')}
           />
         </label>
       </div>
@@ -295,10 +337,11 @@ export function ProjectCreationForm({
           disabled={submitting}
           onClick={onToggleCreate}
         >
-          취소
+          {' '}
+          <UiText text="취소" />{' '}
         </button>
         <button className="primary-action" type="submit" disabled={submitting}>
-          {submitting ? '등록 중…' : '프로젝트 만들기'}
+          {submitting ? uiText('등록 중…') : uiText('프로젝트 만들기')}
         </button>
       </div>
     </form>
@@ -318,6 +361,7 @@ export function ProjectArchiveDialog({
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
   onClose: () => void;
 }) {
+  const uiText = useUiText();
   const archiveDialogRef = useRef<HTMLDialogElement>(null);
   const [archiveError, setArchiveError] = useState('');
 
@@ -371,13 +415,14 @@ export function ProjectArchiveDialog({
           <div className="dialog-heading">
             <div>
               <h2 id="archive-project-title">
-                프로젝트를 목록에서 삭제할까요?
+                {' '}
+                <UiText text="프로젝트를 목록에서 삭제할까요?" />{' '}
               </h2>
             </div>
             <button
               className="icon-button"
               type="button"
-              aria-label="프로젝트 삭제 창 닫기"
+              aria-label={uiText('프로젝트 삭제 창 닫기')}
               disabled={archivingProjectId === archiveTarget.id}
               onClick={closeArchiveDialog}
             >
@@ -385,8 +430,8 @@ export function ProjectArchiveDialog({
             </button>
           </div>
           <p id="archive-project-description">
-            <strong>{archiveTarget.name}</strong> 프로젝트를 정말 삭제할까요?
-            목록에서는 사라지지만 원본 자료와 검수 이력은 안전하게 보관됩니다.
+            <strong>{archiveTarget.name}</strong>{' '}
+            <UiText text="프로젝트를 정말 삭제할까요? 목록에서는 사라지지만 원본 자료와 검수 이력은 안전하게 보관됩니다." />{' '}
           </p>
           {archiveError && (
             <p className="archive-project-error" role="alert">
@@ -400,7 +445,8 @@ export function ProjectArchiveDialog({
               disabled={archivingProjectId === archiveTarget.id}
               onClick={closeArchiveDialog}
             >
-              취소
+              {' '}
+              <UiText text="취소" />{' '}
             </button>
             <button
               type="submit"
@@ -408,7 +454,9 @@ export function ProjectArchiveDialog({
               disabled={archivingProjectId === archiveTarget.id}
             >
               <Trash2 aria-hidden="true" />
-              {archivingProjectId === archiveTarget.id ? '삭제 중…' : '삭제'}
+              {archivingProjectId === archiveTarget.id
+                ? uiText('삭제 중…')
+                : uiText('삭제')}
             </button>
           </div>
         </form>

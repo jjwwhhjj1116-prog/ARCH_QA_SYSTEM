@@ -183,8 +183,12 @@ describe('ModuleWorkspace', () => {
         onOpenProjects={vi.fn()}
       />,
     );
-    expect(screen.getByRole('heading', { name: '설정' })).toBeVisible();
-    expect(screen.getByText('N/A · 미구현')).toBeVisible();
-    expect(screen.getAllByText('미연결')).toHaveLength(4);
+    expect(
+      screen.getByRole('heading', { name: '연결 및 운영 설정' }),
+    ).toBeVisible();
+    expect(screen.queryByText('N/A · 미구현')).not.toBeInTheDocument();
+    expect(screen.getAllByText('미연결')).toHaveLength(2);
+    expect(screen.getByText('결과 저장 후 사용')).toBeVisible();
+    expect(screen.getByText('기본검사: 외부 AI 미사용 · 0 토큰')).toBeVisible();
   });
 });

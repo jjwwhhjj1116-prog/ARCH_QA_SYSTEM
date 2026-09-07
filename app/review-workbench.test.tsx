@@ -58,6 +58,7 @@ const inspection: Inspection = {
   ],
 };
 const state = (): ReviewState => ({
+  canManageGuidelines: true,
   mappingVersionId: null,
   mappings: [],
   sources: [source],
@@ -236,7 +237,9 @@ describe('review preparation and feature navigation', () => {
     mock(data);
     const view = render(<ReviewWorkbench {...props} mode="formula-ai" />);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '검수 실행' })).toBeEnabled(),
+      expect(
+        screen.getByRole('button', { name: '승인 지침으로 추가 검수' }),
+      ).toBeEnabled(),
     );
     expect(
       screen.getByText(/적용 지침: FIN 기본 검토 지침 · v1/u),

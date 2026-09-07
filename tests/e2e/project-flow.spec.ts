@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { mkdirSync } from 'node:fs';
 
 function setLocalProjectRole(
   projectId: string,
@@ -109,7 +110,7 @@ test('project page exposes the full Korean workflow and persists a new project',
       name: 'ＵＩ내부산출서.csv',
       mimeType: 'text/csv',
       buffer: Buffer.from(
-        '내부산출서\n부위,품명,규격,단위,산식,물량\n벽,도장,수성,M2,12.5,12.5\n',
+        '내부산출서\n부위,품명,규격,단위,산식,물량\n벽,도장,수성,M2,12.5,12.5\n벽,합성 미장,T10,M2,10..5,25\n',
         'utf8',
       ),
     },
@@ -179,6 +180,63 @@ test('project page exposes the full Korean workflow and persists a new project',
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   expect(reviewResults.violations).toEqual([]);
+  const startBasic = page.getByRole('button', {
+    name: '전체 자료 확인 후 검수 시작',
+    exact: true,
+  });
+  await expect(startBasic).toBeEnabled();
+  await startBasic.click();
+  await expect(page.locator('.qc-results')).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByText('산식 문법·연산 확인 필요', { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.locator('.qc-success')).toContainText('외부 AI 사용 0토큰');
+  mkdirSync('.impeccable/review', { recursive: true });
+  await page.screenshot({
+    path: `.impeccable/review/review-${test.info().project.name}.png`,
+    fullPage: false,
+  });
+  await page
+    .getByRole('combobox', { name: 'Language / 언어 / Ngôn ngữ' })
+    .first()
+    .selectOption('vi');
+  await page
+    .getByRole('button', {
+      name: 'Nhận diện toàn bộ và bắt đầu kiểm tra',
+      exact: true,
+    })
+    .click();
+  await expect(page.locator('.qc-success')).toContainText(
+    'Đã hoàn tất kiểm tra cơ bản',
+  );
+  await expect(page.locator('.qc-success')).toContainText('0 token');
+  await page
+    .locator('.qc-evidence textarea')
+    .fill('Synthetic unsaved review note');
+  let confirmationMessage = '';
+  page.once('dialog', async (dialog) => {
+    confirmationMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await page
+    .getByRole('button', {
+      name: 'Nhận diện toàn bộ và bắt đầu kiểm tra',
+      exact: true,
+    })
+    .click();
+  expect(confirmationMessage).toBe(
+    'Bỏ lý do kết luận chưa lưu và chạy kiểm tra mới?',
+  );
+  await page.locator('.qc-evidence textarea').fill('');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: `.impeccable/review/review-vi-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+  await page
+    .getByRole('combobox', { name: 'Language / 언어 / Ngôn ngữ' })
+    .first()
+    .selectOption('ko');
   const projectsResponse = await page.request.get('/api/projects');
   expect(projectsResponse.status()).toBe(200);
   const projectsBody = (await projectsResponse.json()) as {
@@ -454,6 +512,47 @@ test('critical accessibility scan has no violations', async ({ page }) => {
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   expect(results.violations).toEqual([]);
+  if (
+    test.info().project.name.startsWith('mobile') ||
+    test.info().project.name.startsWith('tablet')
+  ) {
+    await page
+      .locator('.topbar button[aria-controls="primary-navigation"]')
+      .click();
+  }
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: '개인 설정', exact: true }),
+  ).toBeVisible();
+  if (test.info().project.name.includes('desktop')) {
+    const separator = page.getByRole('separator', {
+      name: '좌측 메뉴 폭 조절',
+    });
+    await separator.focus();
+    await page.keyboard.press('End');
+    await expect(separator).toHaveAttribute('aria-valuenow', '380');
+    await page.keyboard.press('Home');
+    await expect(separator).toHaveAttribute('aria-valuenow', '220');
+  }
+  await page
+    .getByRole('combobox', { name: 'Language / 언어 / Ngôn ngữ' })
+    .first()
+    .selectOption('vi');
+  await expect(
+    page.getByRole('heading', { name: 'Cài đặt cá nhân' }),
+  ).toBeVisible();
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+    ).violations,
+  ).toEqual([]);
+  mkdirSync('.impeccable/review', { recursive: true });
+  await page.screenshot({
+    path: `.impeccable/review/settings-${test.info().project.name}.png`,
+    fullPage: true,
+  });
 });
 
 test('mobile navigation opens with readable text labels', async ({

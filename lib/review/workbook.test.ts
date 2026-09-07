@@ -100,7 +100,7 @@ describe('bounded XLSX source reading', () => {
   });
   it('rejects compact shared-string fanout before materializing giant evidence', () => {
     const rows = Array.from(
-      { length: 600 },
+      { length: 1200 },
       (_, i) => `<row r="${i + 1}"><c r="A${i + 1}" t="s"><v>0</v></c></row>`,
     ).join('');
     expect(() =>
@@ -110,7 +110,7 @@ describe('bounded XLSX source reading', () => {
         }),
         'xlsx',
       ),
-    ).toThrow('4MB');
+    ).toThrow('8MB');
   });
   it('keeps quoted CSV newline and distinguishes empty cells from zero', () => {
     expect(parseCsv('품명,물량\n"벽,\n미장",0\n천장,').rows[1]?.cells).toEqual([

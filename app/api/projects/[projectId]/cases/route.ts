@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import { D1ReviewCaseRepository } from '@/lib/cases/d1-repository';
@@ -32,7 +32,7 @@ export async function GET(
   try {
     const { projectId: rawProjectId } = await context.params;
     const projectId = projectIdSchema.parse(rawProjectId);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     return success(await service.list(projectId, actor), requestId);
@@ -47,10 +47,10 @@ export async function POST(
 ): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
     const { projectId: rawProjectId } = await context.params;
     const projectId = projectIdSchema.parse(rawProjectId);
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const input = (await readJson(request)) as CreateReviewCaseInput;

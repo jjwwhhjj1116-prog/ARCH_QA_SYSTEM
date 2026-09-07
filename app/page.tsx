@@ -1,4 +1,12 @@
 import { ReviewStudio } from './review-studio';
+import { headers } from 'next/headers';
+import { EmployeeLogin } from './employee-login';
+import {
+  employeeActor,
+  employeeLoginEnabled,
+} from '@/lib/auth/employee-server';
+import { AuthenticationError } from '@/lib/auth/request-actor';
+import { isApplicationAdmin } from '@/lib/auth/administrators';
 import {
   chatGPTSignInPath,
   chatGPTSignOutPath,
@@ -12,6 +20,40 @@ import {
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
+  if (employeeLoginEnabled()) {
+    const identity = await employeeActor(new Headers(await headers()))
+      .then((actor) => ({ actor, unavailable: false }))
+      .catch((error: unknown) => ({
+        actor: null,
+        unavailable: !(error instanceof AuthenticationError),
+      }));
+    if (identity.actor) {
+      const actor = identity.actor;
+      return (
+        <ReviewStudio
+          currentUser={{
+            displayName: actor.displayName,
+            email: actor.email,
+            isAdmin: isApplicationAdmin(actor.email),
+          }}
+          employeeLogin
+        />
+      );
+    }
+    if (identity.unavailable) {
+      return (
+        <main className="auth-gate">
+          <section className="auth-card">
+            <h1>로그인 서버에 연결할 수 없습니다</h1>
+            <p>
+              자료 접근은 안전하게 차단되었습니다. 잠시 후 새로고침해 주세요.
+            </p>
+          </section>
+        </main>
+      );
+    }
+    return <EmployeeLogin />;
+  }
   const user = await getChatGPTUser();
   const isLocalDemo =
     process.env.NODE_ENV !== 'production' &&
@@ -95,6 +137,7 @@ export default async function Home() {
       currentUser={{
         displayName: currentUser.displayName,
         email: currentUser.email,
+        isAdmin: isApplicationAdmin(currentUser.email),
       }}
     />
   );

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 
-const ALLOWED_EMAIL = 'authorized@example.com';
+const ALLOWED_EMAIL = 'yjw@con-cost.com';
 const TEST_KEY = 'server-only-route-test-key';
 
 function request(

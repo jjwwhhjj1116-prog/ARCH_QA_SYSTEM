@@ -1,6 +1,6 @@
 import { z, ZodError } from 'zod';
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -54,7 +54,7 @@ async function mutate(
 ) {
   const requestId = requestIdFrom(request.headers);
   try {
-    assertSameSiteMutation(request.headers);
+    assertSameSiteMutation(request.headers, new URL(request.url).origin);
     const params = await context.params;
     const projectId = opaqueIdSchema.parse(params.projectId);
     const caseId = opaqueIdSchema.parse(params.caseId);
@@ -62,7 +62,7 @@ async function mutate(
     const expectedVersion = versionSchema.parse(
       request.headers.get('if-match')?.replaceAll('"', ''),
     );
-    const actor = actorFromHeaders(request.headers, runtimeMode(), {
+    const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const data = await service[action](

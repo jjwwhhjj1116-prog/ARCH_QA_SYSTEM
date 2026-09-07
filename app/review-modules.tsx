@@ -1,4 +1,5 @@
 'use client';
+import { UiText, useUiText } from './ui-translation';
 
 import {
   BarChart3,
@@ -196,6 +197,7 @@ export const studioNavigation = [
 type ModuleView = Exclude<StudioView, 'project-register' | 'project-data'>;
 
 type ModuleWorkspaceProps = {
+  isAdmin?: boolean;
   view: ModuleView;
   selectedProject: ProjectSummary | null;
   reviewCases: ReviewCaseSummary[];
@@ -239,11 +241,12 @@ const tradeMetadata: Record<TradeAnalysisView, TradeMetadata> = {
 };
 
 export function ModuleWorkspace({
+  isAdmin = false,
   view,
   selectedProject,
   onOpenProjects,
 }: ModuleWorkspaceProps) {
-  if (view === 'settings') return <SettingsWorkspace />;
+  if (view === 'settings') return <SettingsWorkspace isAdmin={isAdmin} />;
 
   if (!selectedProject) {
     return (
@@ -253,10 +256,12 @@ export function ModuleWorkspace({
       >
         <LockKeyhole aria-hidden="true" />
         <div>
-          <h1 id="module-empty-title">검수 프로젝트를 먼저 선택하세요</h1>
+          <h1 id="module-empty-title">
+            <UiText text="검수 프로젝트를 먼저 선택하세요" />
+          </h1>
           <p>
-            프로젝트 경계를 확정하고 산출서와 집계표를 등록해야 다음 단계의
-            결과가 다른 현장과 섞이지 않습니다.
+            {' '}
+            <UiText text="프로젝트 경계를 확정하고 산출서와 집계표를 등록해야 다음 단계의 결과가 다른 현장과 섞이지 않습니다." />{' '}
           </p>
         </div>
         <button
@@ -264,7 +269,8 @@ export function ModuleWorkspace({
           type="button"
           onClick={onOpenProjects}
         >
-          프로젝트 등록·선택으로 이동
+          {' '}
+          <UiText text="프로젝트 등록·선택으로 이동" />{' '}
         </button>
       </section>
     );
@@ -306,28 +312,36 @@ function ModuleHeading({
 }
 
 function FormulaWorkspace({ project }: { project: ProjectSummary }) {
+  const uiText = useUiText();
   const [teamFilter, setTeamFilter] = useState<'all' | 'RC' | 'FIN'>('all');
   const showExample = teamFilter !== 'RC';
 
   return (
     <div className="analytics-workspace">
-      <h1 className="sr-only">산출식 AI 검수</h1>
+      <h1 className="sr-only">
+        <UiText text="산출식 AI 검수" />
+      </h1>
       <header className="review-module-context">
         <div>
-          <span>현재 프로젝트</span>
+          <span>
+            <UiText text="현재 프로젝트" />
+          </span>
           <strong>{project.name}</strong>
-          <p>부위·단위·건물 규모를 기준으로 과대 산출식을 확인합니다.</p>
+          <p>
+            <UiText text="부위·단위·건물 규모를 기준으로 과대 산출식을 확인합니다." />
+          </p>
         </div>
         <span className="status-badge status-ready">
-          Level A 결정론 우선 · AI는 설명만
+          {' '}
+          <UiText text="Level A 결정론 우선 · AI는 설명만" />{' '}
         </span>
       </header>
       <div className="module-toolbar">
-        <div className="segmented-control" aria-label="팀 구분">
+        <div className="segmented-control" aria-label={uiText('팀 구분')}>
           {[
-            ['all', '전체'],
-            ['RC', '구조'],
-            ['FIN', '마감'],
+            ['all', uiText('전체')],
+            ['RC', uiText('구조')],
+            ['FIN', uiText('마감')],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -340,46 +354,78 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
             </button>
           ))}
         </div>
-        <span className="status-badge status-pending">입력 매핑 필요</span>
+        <span className="status-badge status-pending">
+          <UiText text="입력 매핑 필요" />
+        </span>
       </div>
       <section className="glass-panel" aria-labelledby="formula-list-title">
         <div className="panel-heading">
           <div>
-            <h2 id="formula-list-title">PM 확인 목록</h2>
-            <p>원식·기대범위·실제값·단위·시트·셀 근거를 한 행에 보존합니다.</p>
+            <h2 id="formula-list-title">
+              <UiText text="PM 확인 목록" />
+            </h2>
+            <p>
+              <UiText text="원식·기대범위·실제값·단위·시트·셀 근거를 한 행에 보존합니다." />
+            </p>
           </div>
-          <span className="result-count">N/A · 미실행</span>
+          <span className="result-count">
+            <UiText text="N/A · 미실행" />
+          </span>
         </div>
-        <section className="data-table-shell" aria-label="산출식 이상치 표">
+        <section
+          className="data-table-shell"
+          aria-label={uiText('산출식 이상치 표')}
+        >
           <table className="analytics-table">
             <thead>
               <tr>
-                <th scope="col">심각도</th>
-                <th scope="col">팀·공종</th>
-                <th scope="col">부위·품명</th>
-                <th scope="col">원 산출식</th>
-                <th scope="col">판정 근거</th>
-                <th scope="col">PM 처리</th>
+                <th scope="col">
+                  <UiText text="심각도" />
+                </th>
+                <th scope="col">
+                  <UiText text="팀·공종" />
+                </th>
+                <th scope="col">
+                  <UiText text="부위·품명" />
+                </th>
+                <th scope="col">
+                  <UiText text="원 산출식" />
+                </th>
+                <th scope="col">
+                  <UiText text="판정 근거" />
+                </th>
+                <th scope="col">
+                  <UiText text="PM 처리" />
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td colSpan={6} className="empty-table-cell">
                   {showExample
-                    ? '산출서와 집계표의 입력 매핑이 완료되면 PM 확인 목록이 표시됩니다.'
-                    : '구조 산출식 검수 엔진이 아직 연결되지 않았습니다.'}
+                    ? uiText(
+                        '산출서와 집계표의 입력 매핑이 완료되면 PM 확인 목록이 표시됩니다.',
+                      )
+                    : uiText(
+                        '구조 산출식 검수 엔진이 아직 연결되지 않았습니다.',
+                      )}
                 </td>
               </tr>
             </tbody>
           </table>
         </section>
         {showExample && (
-          <aside className="prototype-note" aria-label="교육용 판정 예시">
+          <aside
+            className="prototype-note"
+            aria-label={uiText('교육용 판정 예시')}
+          >
             <Sparkles aria-hidden="true" />
             <span>
-              <strong>교육용 예시 · 실제 결과 아님</strong>
-              <code className="formula-danger">123455.1 × 12.5</code> 내부
-              산출식이 건물 규모 대비 과도한지 PM이 확인하는 방식을 보여줍니다.
+              <strong>
+                <UiText text="교육용 예시 · 실제 결과 아님" />
+              </strong>
+              <code className="formula-danger">123455.1 × 12.5</code>{' '}
+              <UiText text="내부 산출식이 건물 규모 대비 과도한지 PM이 확인하는 방식을 보여줍니다." />{' '}
             </span>
           </aside>
         )}
@@ -391,84 +437,123 @@ function FormulaWorkspace({ project }: { project: ProjectSummary }) {
 function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
   return (
     <div className="analytics-workspace">
-      <h1 className="sr-only">중복 ITEM AI 검수</h1>
+      <h1 className="sr-only">
+        <UiText text="중복 ITEM AI 검수" />
+      </h1>
       <header className="review-module-context">
         <div>
-          <span>현재 프로젝트</span>
+          <span>
+            <UiText text="현재 프로젝트" />
+          </span>
           <strong>{project.name}</strong>
           <p>
-            동별집계표의 전체 아이템을 기준으로 공종 오배치와 중복
-            품명·규격·재료코드를 확인합니다. 원본은 자동 병합하지 않습니다.
+            {' '}
+            <UiText text="동별집계표의 전체 아이템을 기준으로 공종 오배치와 중복 품명·규격·재료코드를 확인합니다. 원본은 자동 병합하지 않습니다." />{' '}
           </p>
         </div>
         <span className="status-badge status-warning">
-          부위 하드룰 우선 · PM 확정
+          {' '}
+          <UiText text="부위 하드룰 우선 · PM 확정" />{' '}
         </span>
       </header>
       <section className="glass-panel" aria-labelledby="duplicate-title">
         <div className="panel-heading">
           <div>
-            <h2 id="duplicate-title">공종 오배치 · 중복 아이템 확인</h2>
+            <h2 id="duplicate-title">
+              <UiText text="공종 오배치 · 중복 아이템 확인" />
+            </h2>
             <p>
-              기준 자료: 동별집계표. 공종이 달라도 전체 아이템을 비교하며
-              품명·규격·단위·부위·적용범위를 함께 봅니다.
+              {' '}
+              <UiText text="기준 자료: 동별집계표. 공종이 달라도 전체 아이템을 비교하며 품명·규격·단위·부위·적용범위를 함께 봅니다." />{' '}
             </p>
           </div>
           <span className="status-badge status-pending">
-            N/A · 입력 매핑 필요
+            {' '}
+            <UiText text="N/A · 입력 매핑 필요" />{' '}
           </span>
         </div>
         <div className="merge-matrix-grid">
           <article className="merge-card merge-card-example">
             <div className="merge-card-heading">
               <span className="status-badge status-warning">
-                교육용 예시 · 실제 후보 아님
+                {' '}
+                <UiText text="교육용 예시 · 실제 후보 아님" />{' '}
               </span>
-              <strong>외부 면처리 계열</strong>
+              <strong>
+                <UiText text="외부 면처리 계열" />
+              </strong>
             </div>
             <div className="merge-compare">
               <div>
-                <span>품명</span>
-                <strong>콘크리트면처리</strong>
-                <small>규격: 외부</small>
+                <span>
+                  <UiText text="품명" />
+                </span>
+                <strong>
+                  <UiText text="콘크리트면처리" />
+                </strong>
+                <small>
+                  <UiText text="규격: 외부" />
+                </small>
               </div>
               <div>
-                <span>품명</span>
-                <strong>견출</strong>
-                <small>규격: 외부</small>
+                <span>
+                  <UiText text="품명" />
+                </span>
+                <strong>
+                  <UiText text="견출" />
+                </strong>
+                <small>
+                  <UiText text="규격: 외부" />
+                </small>
               </div>
             </div>
             <dl className="merge-evidence">
               <div>
-                <dt>부위</dt>
-                <dd>외벽 ↔ 외벽</dd>
+                <dt>
+                  <UiText text="부위" />
+                </dt>
+                <dd>
+                  <UiText text="외벽 ↔ 외벽" />
+                </dd>
               </div>
               <div>
-                <dt>단위</dt>
-                <dd>매핑 전</dd>
+                <dt>
+                  <UiText text="단위" />
+                </dt>
+                <dd>
+                  <UiText text="매핑 전" />
+                </dd>
               </div>
               <div>
-                <dt>범위</dt>
-                <dd>교집합 확인 필요</dd>
+                <dt>
+                  <UiText text="범위" />
+                </dt>
+                <dd>
+                  <UiText text="교집합 확인 필요" />
+                </dd>
               </div>
             </dl>
             <button className="primary-action" type="button" disabled>
-              예시 화면 · 실행 불가
+              {' '}
+              <UiText text="예시 화면 · 실행 불가" />{' '}
             </button>
           </article>
           <article className="merge-card guardrail-card">
             <ShieldCheck aria-hidden="true" />
-            <h3>자동 통합 금지</h3>
+            <h3>
+              <UiText text="자동 통합 금지" />
+            </h3>
             <p>
-              미장 아이템이 금속공사에 배치된 경우처럼 현재 공종과 예상 공종이
-              다른 항목은 ‘공종 오배치 의심’으로 구분하고 PM이 확인합니다.
-              공종이 다르다는 이유로 비교 대상에서 빼지 않습니다.
+              {' '}
+              <UiText text="미장 아이템이 금속공사에 배치된 경우처럼 현재 공종과 예상 공종이 다른 항목은 ‘공종 오배치 의심’으로 구분하고 PM이 확인합니다. 공종이 다르다는 이유로 비교 대상에서 빼지 않습니다." />{' '}
             </p>
             <p>
-              내벽≠외벽, 바닥≠천장, 바탕재≠최종마감재는 후보 단계에서
-              차단합니다.
+              {' '}
+              <UiText text="내벽≠외벽, 바닥≠천장, 바탕재≠최종마감재는 후보 단계에서 차단합니다." />{' '}
             </p>
-            <span>조적은 후보·통계 계산에서 제외</span>
+            <span>
+              <UiText text="조적은 후보·통계 계산에서 제외" />
+            </span>
           </article>
         </div>
       </section>
@@ -477,6 +562,7 @@ function DuplicateWorkspace({ project }: { project: ProjectSummary }) {
 }
 
 function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
+  const uiText = useUiText();
   const sources = [
     ['설계개요', 'PDF·이미지', '연면적·건축면적·층 정보'],
     ['면적산정근거표', 'PDF·XLSX', '층별 기준면적과 산정 근거'],
@@ -487,9 +573,9 @@ function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="수량산출 분석표"
+        title={uiText('수량산출 분석표')}
         description={`${project.name}의 4대 원천을 같은 동·층 키로 맞춘 뒤 내부·외부 누락과 과다 면적을 비율로 표시합니다.`}
-        status="4원천 모두 확인 후 확정"
+        status={uiText('4원천 모두 확인 후 확정')}
       />
       <div className="area-source-grid">
         {sources.map(([name, format, purpose], index) => (
@@ -501,38 +587,60 @@ function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
               <p>{purpose}</p>
             </div>
             <span className="source-format">{format}</span>
-            <strong>미등록</strong>
+            <strong>
+              <UiText text="미등록" />
+            </strong>
           </article>
         ))}
       </div>
       <section className="glass-panel" aria-labelledby="area-table-title">
         <div className="panel-heading">
           <div>
-            <h2 id="area-table-title">내부·외부 층별 대조표</h2>
+            <h2 id="area-table-title">
+              <UiText text="내부·외부 층별 대조표" />
+            </h2>
             <p>
-              미확정 원천은 0이 아니라 N/A로 보존하며 조적은 계산에서
-              제외합니다.
+              {' '}
+              <UiText text="미확정 원천은 0이 아니라 N/A로 보존하며 조적은 계산에서 제외합니다." />{' '}
             </p>
           </div>
-          <span className="status-badge status-pending">N/A · 원천 미등록</span>
+          <span className="status-badge status-pending">
+            <UiText text="N/A · 원천 미등록" />
+          </span>
         </div>
-        <section className="data-table-shell" aria-label="층별 면적 대조표">
+        <section
+          className="data-table-shell"
+          aria-label={uiText('층별 면적 대조표')}
+        >
           <table className="analytics-table area-table">
             <thead>
               <tr>
-                <th scope="col">동·층</th>
-                <th scope="col">설계면적</th>
-                <th scope="col">근거표</th>
+                <th scope="col">
+                  <UiText text="동·층" />
+                </th>
+                <th scope="col">
+                  <UiText text="설계면적" />
+                </th>
+                <th scope="col">
+                  <UiText text="근거표" />
+                </th>
                 <th scope="col">CAD</th>
-                <th scope="col">최종마감</th>
-                <th scope="col">누락률</th>
-                <th scope="col">판정</th>
+                <th scope="col">
+                  <UiText text="최종마감" />
+                </th>
+                <th scope="col">
+                  <UiText text="누락률" />
+                </th>
+                <th scope="col">
+                  <UiText text="판정" />
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td colSpan={7} className="empty-table-cell">
-                  4대 원천을 등록하면 내부·외부 층별 분석표가 생성됩니다.
+                  {' '}
+                  <UiText text="4대 원천을 등록하면 내부·외부 층별 분석표가 생성됩니다." />{' '}
                 </td>
               </tr>
             </tbody>
@@ -541,8 +649,8 @@ function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
         <aside className="prototype-note">
           <ShieldCheck aria-hidden="true" />
           <span>
-            조적은 동일 아이템·면적·경험통계 계산에서 제외하고 제외 건수와
-            수량만 감사 기록으로 남깁니다.
+            {' '}
+            <UiText text="조적은 동일 아이템·면적·경험통계 계산에서 제외하고 제외 건수와 수량만 감사 기록으로 남깁니다." />{' '}
           </span>
         </aside>
       </section>
@@ -552,15 +660,20 @@ function AnalysisOverviewWorkspace({ project }: { project: ProjectSummary }) {
       >
         <div className="panel-heading">
           <div>
-            <h2 id="excel-title">거래처 제출용 Excel 분석표</h2>
+            <h2 id="excel-title">
+              <UiText text="거래처 제출용 Excel 분석표" />
+            </h2>
             <p>
-              검토 완료값, 미검증 범위, 규칙 버전과 원본 계보를 함께 냅니다.
+              {' '}
+              <UiText text="검토 완료값, 미검증 범위, 규칙 버전과 원본 계보를 함께 냅니다." />{' '}
             </p>
           </div>
-          <span className="status-badge status-pending">출력 조건 미충족</span>
+          <span className="status-badge status-pending">
+            <UiText text="출력 조건 미충족" />
+          </span>
         </div>
         <button className="primary-action" type="button" disabled>
-          <Download aria-hidden="true" /> Excel 다운로드
+          <Download aria-hidden="true" /> <UiText text="Excel 다운로드" />{' '}
         </button>
       </section>
     </div>
@@ -574,6 +687,7 @@ function TradeAnalysisWorkspace({
   project: ProjectSummary;
   metadata: TradeMetadata;
 }) {
+  const uiText = useUiText();
   if (metadata.trade === '조적') {
     return <MasonryAuditWorkspace project={project} />;
   }
@@ -583,18 +697,22 @@ function TradeAnalysisWorkspace({
       <ModuleHeading
         title={`${metadata.team} · ${metadata.trade} 공종별 분석표`}
         description={`${project.name}의 ${metadata.trade} 산출서와 집계표를 ${metadata.code} 계보 안에서 비교합니다.`}
-        status="N/A · 입력 매핑 필요"
+        status={uiText('N/A · 입력 매핑 필요')}
       />
       <section className="glass-panel" aria-labelledby="trade-analysis-title">
         <div className="panel-heading">
           <div>
-            <h2 id="trade-analysis-title">공종별 수량 대조</h2>
+            <h2 id="trade-analysis-title">
+              <UiText text="공종별 수량 대조" />
+            </h2>
             <p>
-              품명·규격·단위·부위·동·층·산출근거가 연결된 행만 분석에
-              포함합니다.
+              {' '}
+              <UiText text="품명·규격·단위·부위·동·층·산출근거가 연결된 행만 분석에 포함합니다." />{' '}
             </p>
           </div>
-          <span className="result-count">N/A · 미실행</span>
+          <span className="result-count">
+            <UiText text="N/A · 미실행" />
+          </span>
         </div>
         <section
           className="data-table-shell"
@@ -603,20 +721,34 @@ function TradeAnalysisWorkspace({
           <table className="analytics-table">
             <thead>
               <tr>
-                <th scope="col">품명·규격</th>
-                <th scope="col">부위</th>
-                <th scope="col">단위</th>
-                <th scope="col">산출 수량</th>
-                <th scope="col">집계 수량</th>
-                <th scope="col">차이</th>
-                <th scope="col">판정</th>
+                <th scope="col">
+                  <UiText text="품명·규격" />
+                </th>
+                <th scope="col">
+                  <UiText text="부위" />
+                </th>
+                <th scope="col">
+                  <UiText text="단위" />
+                </th>
+                <th scope="col">
+                  <UiText text="산출 수량" />
+                </th>
+                <th scope="col">
+                  <UiText text="집계 수량" />
+                </th>
+                <th scope="col">
+                  <UiText text="차이" />
+                </th>
+                <th scope="col">
+                  <UiText text="판정" />
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td colSpan={7} className="empty-table-cell">
-                  {metadata.trade} 공종의 산출서와 집계표 입력 매핑이 완료되지
-                  않았습니다.
+                  {metadata.trade}{' '}
+                  <UiText text="공종의 산출서와 집계표 입력 매핑이 완료되지 않았습니다." />{' '}
                 </td>
               </tr>
             </tbody>
@@ -628,40 +760,61 @@ function TradeAnalysisWorkspace({
 }
 
 function MasonryAuditWorkspace({ project }: { project: ProjectSummary }) {
+  const uiText = useUiText();
   return (
     <div className="analytics-workspace">
       <ModuleHeading
-        title="마감 · 조적 수량 분석표"
+        title={uiText('마감 · 조적 수량 분석표')}
         description={`${project.name}의 조적 행을 검수 계산에 넣지 않고 제외 건수·수량·원본 계보만 감사합니다.`}
-        status="SYSTEM_HARD_RULE · 계산 제외"
+        status={uiText('SYSTEM_HARD_RULE · 계산 제외')}
       />
       <section className="glass-panel" aria-labelledby="masonry-audit-title">
         <div className="panel-heading">
           <div>
-            <h2 id="masonry-audit-title">조적 제외 감사표</h2>
+            <h2 id="masonry-audit-title">
+              <UiText text="조적 제외 감사표" />
+            </h2>
             <p>
-              AI 검수·동일 아이템·면적분석·경험통계에는 포함하지 않으며
-              excluded_reason만 보존합니다.
+              {' '}
+              <UiText text="AI 검수·동일 아이템·면적분석·경험통계에는 포함하지 않으며 excluded_reason만 보존합니다." />{' '}
             </p>
           </div>
-          <span className="result-count">N/A · 제외 계보 미등록</span>
+          <span className="result-count">
+            <UiText text="N/A · 제외 계보 미등록" />
+          </span>
         </div>
-        <section className="data-table-shell" aria-label="조적 제외 감사표">
+        <section
+          className="data-table-shell"
+          aria-label={uiText('조적 제외 감사표')}
+        >
           <table className="analytics-table">
             <thead>
               <tr>
-                <th scope="col">원본 파일</th>
-                <th scope="col">시트·행</th>
-                <th scope="col">품명·규격</th>
-                <th scope="col">단위</th>
-                <th scope="col">제외 수량</th>
-                <th scope="col">제외 사유</th>
+                <th scope="col">
+                  <UiText text="원본 파일" />
+                </th>
+                <th scope="col">
+                  <UiText text="시트·행" />
+                </th>
+                <th scope="col">
+                  <UiText text="품명·규격" />
+                </th>
+                <th scope="col">
+                  <UiText text="단위" />
+                </th>
+                <th scope="col">
+                  <UiText text="제외 수량" />
+                </th>
+                <th scope="col">
+                  <UiText text="제외 사유" />
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td colSpan={6} className="empty-table-cell">
-                  조적 산출서와 집계표의 제외 계보가 아직 등록되지 않았습니다.
+                  {' '}
+                  <UiText text="조적 산출서와 집계표의 제외 계보가 아직 등록되지 않았습니다." />{' '}
                 </td>
               </tr>
             </tbody>
@@ -672,7 +825,8 @@ function MasonryAuditWorkspace({ project }: { project: ProjectSummary }) {
   );
 }
 
-function SettingsWorkspace() {
+function SettingsWorkspace({ isAdmin }: { isAdmin: boolean }) {
+  const uiText = useUiText();
   const [aiStatus, setAiStatus] = useState<GeminiConfigurationStatus | null>(
     null,
   );
@@ -792,33 +946,36 @@ function SettingsWorkspace() {
   }
 
   return (
-    <div className="analytics-workspace">
+    <div className="settings-workspace">
       <ModuleHeading
-        title="설정"
-        description="승인 계정, Gemini AI, ERP 프로젝트 연동과 검수 규칙 프로필 상태를 관리합니다."
-        status="서버 보안 설정"
+        title={uiText('연결 및 운영 설정')}
+        description={uiText(
+          '승인 계정, Gemini AI, ERP 프로젝트 연동과 검수 규칙 프로필 상태를 관리합니다.',
+        )}
+        status={uiText('서버 보안 설정')}
       />
       <section
-        className="glass-panel ai-settings-panel ai-settings-panel--gemini"
+        className="settings-card ai-settings-panel ai-settings-panel--gemini"
         aria-labelledby="ai-settings-title"
       >
         <div className="panel-heading">
           <div>
-            <span className="panel-kicker">AI PROVIDER</span>
-            <h2 id="ai-settings-title">Gemini API 연동</h2>
+            <h2 id="ai-settings-title">
+              <UiText text="Gemini API 연동" />
+            </h2>
             <p>
-              API 키는 브라우저·D1·로그에 저장하지 않고 Sites 서버
-              환경변수에서만 읽습니다.
+              {' '}
+              <UiText text="API 키는 브라우저·D1·로그에 저장하지 않고 Sites 서버 환경변수에서만 읽습니다." />{' '}
             </p>
           </div>
           <span
             className={`status-badge ${aiStatus?.status === 'ready' ? 'status-ready' : 'status-pending'}`}
           >
             {aiStatus?.status === 'ready'
-              ? '설정 완료'
+              ? uiText('설정 완료')
               : aiStatus?.status === 'invalid_configuration'
-                ? '설정 오류'
-                : '미연결'}
+                ? uiText('설정 오류')
+                : uiText('미연결')}
           </span>
         </div>
         <div className="ai-settings-grid">
@@ -829,51 +986,55 @@ function SettingsWorkspace() {
             </div>
             <div>
               <dt>Model</dt>
-              <dd>{aiStatus?.model ?? 'N/A · 미등록'}</dd>
+              <dd>{aiStatus?.model ?? uiText('N/A · 미등록')}</dd>
             </div>
             <div>
               <dt>Secret</dt>
-              <dd>서버 전용 · 화면 비노출</dd>
+              <dd>
+                <UiText text="서버 전용 · 화면 비노출" />
+              </dd>
             </div>
             <div>
               <dt>Review</dt>
-              <dd>데이터 매핑 완료 전 미실행</dd>
+              <dd>{uiText('기본검사: 외부 AI 미사용 · 0 토큰')}</dd>
             </div>
           </dl>
           <div className="ai-settings-actions">
-            <output aria-live="polite">{aiMessage}</output>
+            <output aria-live="polite">{uiText(aiMessage)}</output>
             <button
               className="primary-action"
               type="button"
-              disabled={aiStatus?.status !== 'ready' || testing}
+              disabled={!isAdmin || aiStatus?.status !== 'ready' || testing}
+              title={!isAdmin ? uiText('관리자 전용') : undefined}
               onClick={() => void testConnection()}
             >
-              {testing ? '연결 확인 중…' : 'Gemini 연결 시험'}
+              {testing ? uiText('연결 확인 중…') : uiText('Gemini 연결 시험')}
             </button>
           </div>
         </div>
       </section>
       <section
-        className="glass-panel ai-settings-panel ai-settings-panel--memory"
+        className="settings-card ai-settings-panel ai-settings-panel--memory"
         aria-labelledby="memory-settings-title"
       >
         <div className="panel-heading">
           <div>
-            <span className="panel-kicker">SHARED DEVELOPMENT MEMORY</span>
-            <h2 id="memory-settings-title">Mem0 공유 메모리</h2>
+            <h2 id="memory-settings-title">
+              <UiText text="Mem0 공유 메모리" />
+            </h2>
             <p>
-              프로젝트 규칙과 작업 맥락을 검색하는 보조 계층입니다. 산출서 원본,
-              판정 결과와 감사 기록의 기준 저장소는 계속 Cloudflare D1·R2입니다.
+              {' '}
+              <UiText text="프로젝트 규칙과 작업 맥락을 검색하는 보조 계층입니다. 산출서 원본, 판정 결과와 감사 기록의 기준 저장소는 계속 Cloudflare D1·R2입니다." />{' '}
             </p>
           </div>
           <span
             className={`status-badge ${memoryStatus?.status === 'ready' ? 'status-ready' : 'status-pending'}`}
           >
             {memoryStatus?.status === 'ready'
-              ? '조회 준비 완료'
+              ? uiText('조회 준비 완료')
               : memoryStatus?.status === 'not_configured'
-                ? '키 미등록'
-                : '비활성'}
+                ? uiText('키 미등록')
+                : uiText('비활성')}
           </span>
         </div>
         <div className="ai-settings-grid">
@@ -888,38 +1049,61 @@ function SettingsWorkspace() {
             </div>
             <div>
               <dt>Access</dt>
-              <dd>프로젝트 멤버만 · 읽기 전용</dd>
+              <dd>
+                <UiText text="프로젝트 멤버만 · 읽기 전용" />
+              </dd>
             </div>
             <div>
               <dt>Workbook</dt>
-              <dd>원본·수식·수량 외부 전송 금지</dd>
+              <dd>
+                <UiText text="원본·수식·수량 외부 전송 금지" />
+              </dd>
             </div>
           </dl>
           <div className="ai-settings-actions">
-            <output aria-live="polite">{memoryMessage}</output>
+            <output aria-live="polite">{uiText(memoryMessage)}</output>
             <span className="settings-safety-note">
-              쓰기 API는 아직 닫혀 있습니다. 운영 정책 승인 후 별도
-              활성화합니다.
+              {' '}
+              <UiText text="쓰기 API는 아직 닫혀 있습니다. 운영 정책 승인 후 별도 활성화합니다." />{' '}
             </span>
           </div>
         </div>
       </section>
-      <section className="glass-panel" aria-labelledby="settings-title">
+      <section className="settings-card" aria-labelledby="settings-title">
         <div className="panel-heading">
           <div>
-            <h2 id="settings-title">연동 및 정책 상태</h2>
+            <h2 id="settings-title">
+              <UiText text="연동 및 정책 상태" />
+            </h2>
             <p>
-              현재 화면은 상태만 공개합니다. 서버 정책과 감사 기록이 없는 설정을
-              활성 상태로 표시하지 않습니다.
+              {' '}
+              <UiText text="현재 화면은 상태만 공개합니다. 서버 정책과 감사 기록이 없는 설정을 활성 상태로 표시하지 않습니다." />{' '}
             </p>
           </div>
-          <span className="status-badge status-pending">N/A · 미구현</span>
         </div>
         <div className="readiness-matrix">
-          <SettingsStatus title="승인 계정 정책" state="서버 적용" />
-          <SettingsStatus title="ERP 프로젝트 연동" />
-          <SettingsStatus title="검수 규칙 프로필" />
-          <SettingsStatus title="Excel 출력 정책" />
+          <SettingsStatus
+            title={uiText('승인 계정 정책')}
+            state={uiText('서버 적용')}
+            description={uiText(
+              '로그인 여부와 프로젝트별 접근 권한을 서버에서 확인합니다.',
+            )}
+          />
+          <SettingsStatus title={uiText('ERP 프로젝트 연동')} />
+          <SettingsStatus
+            title={uiText('검수 규칙 프로필')}
+            state={uiText('관리자 전용')}
+            description={uiText(
+              '기본검사는 바로 실행합니다. 회사·현장 지침은 지정 관리자만 시험·활성화합니다.',
+            )}
+          />
+          <SettingsStatus
+            title={uiText('Excel 출력 정책')}
+            state={uiText('결과 저장 후 사용')}
+            description={uiText(
+              '검토 목록·미평가 사유·판단 이력을 원본 근거와 함께 내보냅니다.',
+            )}
+          />
         </div>
       </section>
     </div>
@@ -929,18 +1113,21 @@ function SettingsWorkspace() {
 function SettingsStatus({
   title,
   state = '미연결',
+  description = '서버 계약과 운영 권한 연결 후 활성화됩니다.',
 }: {
   title: string;
   state?: string;
+  description?: string;
 }) {
+  const uiText = useUiText();
   return (
     <article className="readiness-item">
       <Settings aria-hidden="true" />
       <div>
         <h3>{title}</h3>
-        <p>서버 계약과 운영 권한 연결 후 활성화됩니다.</p>
+        <p>{uiText(description)}</p>
       </div>
-      <span>{state}</span>
+      <span>{uiText(state)}</span>
     </article>
   );
 }

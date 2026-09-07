@@ -13,6 +13,7 @@ const escapeXml = (value: string | number | null | undefined) =>
     .replaceAll('"', '&quot;');
 // All exported cells are OOXML inline strings: spreadsheet formula injection is never executed.
 export function exportReview(run: Run, decisions: Decision[]): Uint8Array {
+  const rowsById = new Map(run.rows.map((row) => [row.id, row]));
   const latest = new Map(decisions.map((d) => [d.findingId, d]));
   const sheets: { name: string; rows: (string | number)[][] }[] = [
     {
@@ -43,11 +44,15 @@ export function exportReview(run: Run, decisions: Decision[]): Uint8Array {
           '사유',
         ],
         ...run.findings.map((f) => {
-          const row = run.rows.find((r) => r.id === f.rowId)!;
+          const row = rowsById.get(f.rowId)!;
           const d = latest.get(f.id);
           return [
             run.id,
-            run.trial ? '시험 · 정식 검수 아님' : '정식',
+            run.kind === 'baseline'
+              ? '제품 기본검사 · 최종 승인 아님'
+              : run.trial
+                ? '시험 · 정식 검수 아님'
+                : '승인 지침 검수 · 최종 승인 아님',
             run.profileVersion,
             f.ruleId,
             f.level,
@@ -76,6 +81,15 @@ export function exportReview(run: Run, decisions: Decision[]): Uint8Array {
       name: '검수 범위와 제한',
       rows: [
         ['실행 ID', run.id],
+        [
+          '실행 구분',
+          run.kind === 'baseline'
+            ? '제품 기본검사 · 외부 AI 미사용'
+            : run.trial
+              ? '지침 시험'
+              : '승인 지침 검수',
+        ],
+        ['검사 대상 행', run.rowCount ?? run.rows.length],
         ['검사 엔진', run.engineVersion],
         ['실행 시각', run.createdAt],
         ['지침', run.profile.name],

@@ -1,4 +1,5 @@
 'use client';
+import { UiText, useUiText } from './ui-translation';
 
 import {
   AlertTriangle,
@@ -19,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  type CSSProperties,
   type SyntheticEvent,
   useCallback,
   useEffect,
@@ -41,13 +43,19 @@ import {
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewWorkbench } from './review-workbench';
-import { can } from '@/lib/domain/permissions';
 import {
   ProjectArchiveDialog,
   ProjectCreationForm,
   ProjectRegistrationWorkspace,
 } from './project-registration-workspace';
 import { ModuleWorkspace, type StudioView } from './review-modules';
+import {
+  WorkspacePreferences,
+  useWorkspacePreferences,
+  LanguageSwitch,
+  SidebarResizer,
+  PersonalPreferences,
+} from './workspace-preferences';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type MessageTone = 'neutral' | 'success' | 'error';
@@ -60,14 +68,26 @@ export type UploadFailure = {
 };
 
 type ReviewStudioProps = {
-  currentUser: { displayName: string; email: string };
+  currentUser: { displayName: string; email: string; isAdmin?: boolean };
+  employeeLogin?: boolean;
   isLocalDemo?: boolean;
 };
 
-export function ReviewStudio({
+export function ReviewStudio(props: ReviewStudioProps) {
+  return (
+    <WorkspacePreferences>
+      <ReviewStudioContent {...props} />
+    </WorkspacePreferences>
+  );
+}
+
+function ReviewStudioContent({
   currentUser,
+  employeeLogin = false,
   isLocalDemo = false,
 }: ReviewStudioProps) {
+  const uiText = useUiText();
+  const { sidebarWidth } = useWorkspacePreferences();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [message, setMessage] = useState('프로젝트를 불러오는 중입니다.');
@@ -1062,15 +1082,20 @@ export function ReviewStudio({
   }
 
   return (
-    <div className="studio-shell" data-current-stage={stage?.tone ?? 'neutral'}>
+    <div
+      className="studio-shell"
+      style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+      data-current-stage={stage?.tone ?? 'neutral'}
+    >
       <a className="skip-link" href="#main-content">
-        본문으로 건너뛰기
+        {' '}
+        <UiText text="본문으로 건너뛰기" />{' '}
       </a>
       <aside
         ref={primarySidebarRef}
         id="primary-navigation"
         className={`sidebar primary-sidebar${mobileNav ? ' is-open' : ''}`}
-        aria-label="주요 메뉴"
+        aria-label={uiText('주요 메뉴')}
       >
         <div className="brand-lockup">
           <span aria-hidden="true" className="brand-logo brand-logo-stacked" />
@@ -1082,17 +1107,22 @@ export function ReviewStudio({
             ref={closeMenuButtonRef}
             className="icon-button mobile-only"
             type="button"
-            aria-label="메뉴 닫기"
+            aria-label={uiText('메뉴 닫기')}
             onClick={closeMobileNavigation}
           >
             <X aria-hidden="true" />
           </button>
         </div>
         <div className="brand-description">
-          <strong>CONCOST 기술본부 QC 스튜디오</strong>
+          <strong>
+            <UiText text="CONCOST 기술본부 QC 스튜디오" />
+          </strong>
           <span>QUANTITY CONTROL WORKSPACE</span>
         </div>
-        <nav className="primary-nav project-sidebar-nav" aria-label="프로젝트">
+        <nav
+          className="primary-nav project-sidebar-nav"
+          aria-label={uiText('프로젝트')}
+        >
           <button
             ref={sidebarAddRef}
             className="sidebar-project-add"
@@ -1107,7 +1137,7 @@ export function ReviewStudio({
               );
             }}
           >
-            <FolderPlus aria-hidden="true" /> 새 프로젝트
+            <FolderPlus aria-hidden="true" /> <UiText text="새 프로젝트" />{' '}
           </button>
           {showCreate === 'sidebar' && (
             <div id="sidebar-project-create">
@@ -1121,17 +1151,21 @@ export function ReviewStudio({
             </div>
           )}
           <div className="sidebar-project-heading">
-            <span>프로젝트 목록</span>
+            <span>
+              <UiText text="프로젝트 목록" />
+            </span>
             <strong>{projects.length}</strong>
           </div>
           <label className="sidebar-project-search">
             <Search aria-hidden="true" />
-            <span className="sr-only">좌측 프로젝트 검색</span>
+            <span className="sr-only">
+              <UiText text="좌측 프로젝트 검색" />
+            </span>
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="프로젝트 검색"
+              placeholder={uiText('프로젝트 검색')}
             />
           </label>
           <div className="sidebar-project-list">
@@ -1152,7 +1186,9 @@ export function ReviewStudio({
                   <FolderKanban aria-hidden="true" />
                   <span>
                     <strong>{project.name}</strong>
-                    <small>{project.clientName || 'ERP 연동 대기'}</small>
+                    <small>
+                      {project.clientName || uiText('ERP 연동 대기')}
+                    </small>
                   </span>
                 </button>
                 {(project.role === 'workspace_admin' ||
@@ -1164,13 +1200,17 @@ export function ReviewStudio({
                     disabled={uploading || archivingProjectId !== null}
                     onClick={() => requestArchiveProject(project)}
                   >
-                    {archivingProjectId === project.id ? '삭제 중' : '삭제'}
+                    {archivingProjectId === project.id
+                      ? uiText('삭제 중')
+                      : uiText('삭제')}
                   </button>
                 )}
               </div>
             ))}
             {loadState === 'ready' && visibleProjects.length === 0 && (
-              <p>검색 조건에 맞는 프로젝트가 없습니다.</p>
+              <p>
+                <UiText text="검색 조건에 맞는 프로젝트가 없습니다." />
+              </p>
             )}
           </div>
           <button
@@ -1178,7 +1218,7 @@ export function ReviewStudio({
             type="button"
             onClick={() => navigate('settings')}
           >
-            <Settings aria-hidden="true" /> 설정
+            <Settings aria-hidden="true" /> <UiText text="설정" />{' '}
           </button>
         </nav>
         <div className="sidebar-foot">
@@ -1192,16 +1232,37 @@ export function ReviewStudio({
             </span>
           </div>
           <p>
-            <span className="status-dot" /> 승인 계정 전용
+            <span className="status-dot" />{' '}
+            <UiText text="승인 계정 전용" />{' '}
           </p>
+          {employeeLogin && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={async () => {
+                if (
+                  reviewNavigationGuard.current &&
+                  !reviewNavigationGuard.current()
+                )
+                  return;
+                const response = await fetch('/api/auth/logout', {
+                  method: 'POST',
+                });
+                if (response.ok) window.location.assign('/');
+              }}
+            >
+              <UiText text="로그아웃" />
+            </button>
+          )}
         </div>
       </aside>
+      <SidebarResizer />
 
       {mobileNav && (
         <button
           className="nav-scrim"
           type="button"
-          aria-label="메뉴 닫기"
+          aria-label={uiText('메뉴 닫기')}
           onClick={closeMobileNavigation}
         />
       )}
@@ -1214,8 +1275,12 @@ export function ReviewStudio({
         {isLocalDemo && (
           <div className="demo-mode-banner" role="alert">
             <AlertTriangle aria-hidden="true" />
-            <strong>로컬 검증 모드</strong>
-            <span>인증을 우회한 개발 환경이며 운영 화면이 아닙니다.</span>
+            <strong>
+              <UiText text="로컬 검증 모드" />
+            </strong>
+            <span>
+              <UiText text="인증을 우회한 개발 환경이며 운영 화면이 아닙니다." />
+            </span>
           </div>
         )}
         <header className="topbar">
@@ -1223,7 +1288,7 @@ export function ReviewStudio({
             ref={menuButtonRef}
             className="icon-button mobile-only"
             type="button"
-            aria-label="메뉴 열기"
+            aria-label={uiText('메뉴 열기')}
             aria-controls="primary-navigation"
             aria-expanded={mobileNav}
             onClick={() => setMobileNav(true)}
@@ -1231,19 +1296,29 @@ export function ReviewStudio({
             <Menu aria-hidden="true" />
           </button>
           <div className="topbar-title">
-            <strong>CONCOST 기술본부 QC 스튜디오</strong>
-            <span>물량산출 완료 후 PM·팀별 검수 워크스페이스</span>
+            <strong>
+              <UiText text="CONCOST 기술본부 QC 스튜디오" />
+            </strong>
+            <span>
+              <UiText text="물량산출 완료 후 PM·팀별 검수 워크스페이스" />
+            </span>
           </div>
-          <div className="stage-indicator" aria-label="현재 업무 단계">
-            <span>{stage?.stage ? `${stage.stage} / 3` : '설정'}</span>
-            <strong>{stage?.label ?? '프로젝트 등록'}</strong>
+          <div
+            className="stage-indicator"
+            aria-label={uiText('현재 업무 단계')}
+          >
+            <span>{stage?.stage ? `${stage.stage} / 3` : uiText('설정')}</span>
+            <strong>{stage?.label ?? uiText('프로젝트 등록')}</strong>
           </div>
           <div className="project-switcher">
             <span>
-              <Link2Off aria-hidden="true" /> ERP 연동 대기
+              <Link2Off aria-hidden="true" />{' '}
+              <UiText text="ERP 연동 대기" />{' '}
             </span>
             <label>
-              <span className="sr-only">현재 프로젝트</span>
+              <span className="sr-only">
+                <UiText text="현재 프로젝트" />
+              </span>
               <select
                 value={selectedProjectId ?? ''}
                 disabled={uploading}
@@ -1252,7 +1327,9 @@ export function ReviewStudio({
                   else clearProjectSelection();
                 }}
               >
-                <option value="">프로젝트 선택</option>
+                <option value="">
+                  <UiText text="프로젝트 선택" />
+                </option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -1263,8 +1340,10 @@ export function ReviewStudio({
             </label>
           </div>
           <span className="qc-release-marker">
-            FIN 검수 작업실 · 2026.09.07
+            {' '}
+            <UiText text="FIN 검수 작업실 · v15 · 2026.09.07" />{' '}
           </span>
+          <LanguageSwitch />
         </header>
 
         {activeView !== 'settings' && (
@@ -1356,7 +1435,9 @@ export function ReviewStudio({
                 if (
                   sourceFiles.length > 0 &&
                   !window.confirm(
-                    '아직 저장하지 않은 선택 파일이 있습니다. 선택을 취소하고 현재 저장된 자료로 검수 단계에 이동할까요?',
+                    uiText(
+                      '아직 저장하지 않은 선택 파일이 있습니다. 선택을 취소하고 현재 저장된 자료로 검수 단계에 이동할까요?',
+                    ),
                   )
                 )
                   return;
@@ -1394,7 +1475,7 @@ export function ReviewStudio({
             />
           ) : activeView === 'settings' ? (
             <div className="qc-settings-workspace">
-              <nav className="qc-tabs" aria-label="설정 메뉴">
+              <nav className="qc-tabs" aria-label={uiText('설정 메뉴')}>
                 <button
                   aria-current={
                     settingsSection === 'general' ? 'page' : undefined
@@ -1407,23 +1488,24 @@ export function ReviewStudio({
                       setSettingsSection('general');
                   }}
                 >
-                  연동 및 상태
+                  {' '}
+                  <UiText text="연동 및 상태" />{' '}
                 </button>
-                {selectedProject &&
-                  can(selectedProject.role, 'rule:manage') && (
-                    <button
-                      aria-current={
-                        settingsSection === 'rules' ? 'page' : undefined
-                      }
-                      onClick={() => setSettingsSection('rules')}
-                    >
-                      검수 지침 관리 · 관리자
-                    </button>
-                  )}
+                {selectedProject && currentUser.isAdmin && (
+                  <button
+                    aria-current={
+                      settingsSection === 'rules' ? 'page' : undefined
+                    }
+                    onClick={() => setSettingsSection('rules')}
+                  >
+                    {' '}
+                    <UiText text="검수 지침 관리 · 관리자" />{' '}
+                  </button>
+                )}
               </nav>
               {settingsSection === 'rules' &&
               selectedProject &&
-              can(selectedProject.role, 'rule:manage') ? (
+              currentUser.isAdmin ? (
                 <ReviewWorkbench
                   key={`rules-${selectedProject.id}`}
                   project={selectedProject}
@@ -1437,12 +1519,16 @@ export function ReviewStudio({
                   onSources={() => navigate('project-data')}
                 />
               ) : (
-                <ModuleWorkspace
-                  view="settings"
-                  selectedProject={selectedProject}
-                  reviewCases={reviewCases}
-                  onOpenProjects={() => navigate('project-register')}
-                />
+                <>
+                  <PersonalPreferences />
+                  <ModuleWorkspace
+                    isAdmin={currentUser.isAdmin}
+                    view="settings"
+                    selectedProject={selectedProject}
+                    reviewCases={reviewCases}
+                    onOpenProjects={() => navigate('project-register')}
+                  />
+                </>
               )}
             </div>
           ) : (
@@ -1478,6 +1564,7 @@ function WorkflowRail({
   hasStoredSources: boolean;
   onNavigate: (view: StudioView) => void;
 }) {
+  const uiText = useUiText();
   const activeStep = workflowStage(activeView)?.stage ?? 1;
   const steps = [
     {
@@ -1511,10 +1598,14 @@ function WorkflowRail({
       <div className="workflow-rail-heading">
         <div>
           <span>QC WORKFLOW</span>
-          <strong id="workflow-title">검수 진행 단계</strong>
+          <strong id="workflow-title">
+            <UiText text="검수 진행 단계" />
+          </strong>
         </div>
         {!hasStoredSources && hasSelectedProject && (
-          <small>STEP 2부터는 자료 저장 완료 후 열립니다.</small>
+          <small>
+            <UiText text="STEP 2부터는 자료 저장 완료 후 열립니다." />
+          </small>
         )}
       </div>
       <ol>
@@ -1549,10 +1640,12 @@ function WorkflowRail({
                 </span>
                 <span>
                   <strong>
-                    STEP {step.number} · {step.label}
+                    STEP {step.number} · {uiText(step.label)}
                   </strong>
                   <small id={`workflow-step-${step.number}-reason`}>
-                    {step.disabled ? '자료 등록 필요' : step.description}
+                    {step.disabled
+                      ? uiText('자료 등록 필요')
+                      : uiText(step.description)}
                   </small>
                 </span>
                 <step.icon aria-hidden="true" />
@@ -1562,7 +1655,10 @@ function WorkflowRail({
         })}
       </ol>
       {activeStep === 2 && (
-        <nav className="ai-review-chooser" aria-label="AI 검수 기능 선택">
+        <nav
+          className="ai-review-chooser"
+          aria-label={uiText('AI 검수 기능 선택')}
+        >
           <button
             className={`ai-review-choice is-formula${activeView === 'formula-ai' ? ' is-active' : ''}`}
             type="button"
@@ -1574,13 +1670,18 @@ function WorkflowRail({
             </span>
             <span className="ai-review-choice-copy">
               <small>AI REVIEW 01</small>
-              <strong>산출식 AI 검수</strong>
+              <strong>
+                <UiText text="산출식 AI 검수" />
+              </strong>
               <span>
-                확인된 산식·치수와 지침을 대조합니다. AI 의미 검수는 후속입니다.
+                {' '}
+                <UiText text="확인된 산식·치수와 지침을 대조합니다. AI 의미 검수는 후속입니다." />{' '}
               </span>
             </span>
             <span className="ai-review-choice-action">
-              {activeView === 'formula-ai' ? '현재 선택' : '검수 화면 열기'}
+              {activeView === 'formula-ai'
+                ? uiText('현재 선택')
+                : uiText('검수 화면 열기')}
               <ArrowRight aria-hidden="true" />
             </span>
           </button>
@@ -1595,11 +1696,17 @@ function WorkflowRail({
             </span>
             <span className="ai-review-choice-copy">
               <small>AI REVIEW 02</small>
-              <strong>중복 ITEM AI 검수</strong>
-              <span>동별집계표의 중복 코드·공종 분산 후보를 확인합니다.</span>
+              <strong>
+                <UiText text="중복 ITEM AI 검수" />
+              </strong>
+              <span>
+                <UiText text="동별집계표의 중복 코드·공종 분산 후보를 확인합니다." />
+              </span>
             </span>
             <span className="ai-review-choice-action">
-              {activeView === 'duplicate-ai' ? '현재 선택' : '검수 화면 열기'}
+              {activeView === 'duplicate-ai'
+                ? uiText('현재 선택')
+                : uiText('검수 화면 열기')}
               <ArrowRight aria-hidden="true" />
             </span>
           </button>
@@ -1608,19 +1715,27 @@ function WorkflowRail({
       {analysisActive && (
         <nav
           className="workflow-subnav analysis-subnav"
-          aria-label="분석표 종류"
+          aria-label={uiText('분석표 종류')}
         >
           <button type="button" disabled>
-            분석표 개요 <small>준비 중</small>
+            {' '}
+            <UiText text="분석표 개요" />{' '}
+            <small>
+              <UiText text="준비 중" />
+            </small>
           </button>
           <button type="button" disabled>
-            구조팀 <small>준비 중</small>
+            {' '}
+            <UiText text="구조팀" />{' '}
+            <small>
+              <UiText text="준비 중" />
+            </small>
           </button>
           {[
-            ['analysis-finish-interior', '마감 · 내부'],
-            ['analysis-finish-exterior', '마감 · 외부'],
-            ['analysis-finish-masonry', '마감 · 조적'],
-            ['analysis-finish-window', '마감 · 창호'],
+            ['analysis-finish-interior', uiText('마감 · 내부')],
+            ['analysis-finish-exterior', uiText('마감 · 외부')],
+            ['analysis-finish-masonry', uiText('마감 · 조적')],
+            ['analysis-finish-window', uiText('마감 · 창호')],
           ].map(([view, label]) => (
             <button
               key={view}

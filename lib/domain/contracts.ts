@@ -14,7 +14,7 @@ export type Actor = {
   id: string;
   email: string;
   displayName: string;
-  source: 'workspace' | 'development_mock';
+  source: 'workspace' | 'development_mock' | 'employee';
 };
 
 export const createProjectSchema = z.object({

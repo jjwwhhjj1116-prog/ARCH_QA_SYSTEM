@@ -1,5 +1,5 @@
 import {
-  actorFromHeaders,
+  authenticateRequest,
   AuthenticationError,
 } from '@/lib/auth/request-actor';
 import type {
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   try {
-    actorFromHeaders(request.headers, runtimeMode(), {
+    await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
     const body: ApiSuccessEnvelope<
