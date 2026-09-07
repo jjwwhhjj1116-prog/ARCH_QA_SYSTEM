@@ -7,7 +7,13 @@ function database() {
   for (const name of readdirSync('drizzle')
     .filter((n) => n.endsWith('.sql'))
     .sort())
-    db.exec(readFileSync('drizzle/' + name, 'utf8'));
+    for (const statement of readFileSync('drizzle/' + name, 'utf8').split(
+      '--> statement-breakpoint',
+    )) {
+      if (name === '0005_fin_review_workstation.sql')
+        db.prepare(statement.trim()).run();
+      else db.exec(statement);
+    }
   db.exec(
     "INSERT INTO user_profile VALUES ('u','synthetic@example.invalid','Synthetic',0); INSERT INTO project VALUES ('p','P','합성 시험',NULL,'active','u',0); INSERT INTO project_member VALUES ('m','p','u','project_owner',0); INSERT INTO review_case VALUES ('c','p','마감팀','FIN','draft','u',NULL,NULL,0);",
   );
