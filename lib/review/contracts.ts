@@ -42,6 +42,12 @@ export const mappingSchema = z
       >,
     ),
     confirmed: z.boolean(),
+    recognition: z
+      .object({
+        layout: z.string().max(60),
+        version: z.literal(1),
+      })
+      .optional(),
     arithmeticBasis: z.enum(['unknown', 'formula-result']),
     dimensionRole: z.enum([
       'unknown',

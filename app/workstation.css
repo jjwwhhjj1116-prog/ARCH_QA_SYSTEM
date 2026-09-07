@@ -1249,10 +1249,24 @@ th {
 }
 .qc-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0;
   margin: 0 0 20px;
   border-bottom: 2px solid #c8d9e8;
+}
+.qc-preparation-guide {
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  background: #eaf5ff;
+  border: 1px solid #bdd7ef;
+  border-radius: 8px;
+  color: #214f77;
+}
+.qc-preparation-guide p {
+  margin: 0 0 8px;
+}
+.qc-settings-workspace {
+  min-width: 0;
 }
 .qc-tabs button {
   background: transparent;

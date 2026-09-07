@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   ArrowRight,
   Check,
@@ -41,6 +47,10 @@ export function ReviewWorkbench({
   mode,
   onSources,
   onCaseChange,
+  adminSettings = false,
+  onSettings,
+  navigationGuard,
+  onNavigationGuard,
 }: {
   project: ProjectSummary;
   cases: ReviewCaseSummary[];
@@ -48,6 +58,10 @@ export function ReviewWorkbench({
   mode: 'formula-ai' | 'duplicate-ai';
   onSources: () => void;
   onCaseChange: (id: string) => void;
+  adminSettings?: boolean;
+  onSettings?: () => void;
+  navigationGuard?: RefObject<(() => boolean) | null>;
+  onNavigationGuard?: (guard: (() => boolean) | null) => void;
 }) {
   const finCases = cases.filter(
     (c) => c.discipline === 'FIN' && c.status !== 'archived',
@@ -83,7 +97,13 @@ export function ReviewWorkbench({
         <span>마감팀</span>
         <label>
           자료 기록
-          <select value={caseId} onChange={(e) => setCaseId(e.target.value)}>
+          <select
+            value={caseId}
+            onChange={(e) => {
+              if (!navigationGuard?.current || navigationGuard.current())
+                setCaseId(e.target.value);
+            }}
+          >
             {finCases.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -98,6 +118,9 @@ export function ReviewWorkbench({
         project={project}
         caseId={caseId}
         mode={mode}
+        adminSettings={adminSettings}
+        onSettings={onSettings}
+        onNavigationGuard={onNavigationGuard}
       />
     </div>
   );
@@ -106,17 +129,27 @@ function WorkbenchCase({
   project,
   caseId,
   mode,
+  adminSettings,
+  onSettings,
+  onNavigationGuard,
 }: {
   project: ProjectSummary;
   caseId: string;
   mode: 'formula-ai' | 'duplicate-ai';
+  adminSettings: boolean;
+  onSettings?: () => void;
+  onNavigationGuard?: (guard: (() => boolean) | null) => void;
 }) {
   const [state, setState] = useState<ReviewState | null>(null);
-  const [tab, setTab] = useState<'mapping' | 'rules' | 'results'>('mapping');
+  const [tab, setTab] = useState<'mapping' | 'rules' | 'results'>(
+    adminSettings ? 'rules' : 'mapping',
+  );
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [openingSourceId, setOpeningSourceId] = useState('');
+  const [preparation, setPreparation] = useState<Record<string, string>>({});
   const [sheetName, setSheetName] = useState('');
   const [mapping, setMapping] = useState<Mapping | null>(null);
   const [profile, setProfile] = useState<Profile>({ ...defaultProfile });
@@ -125,7 +158,7 @@ function WorkbenchCase({
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [filter, setFilter] = useState<'all' | 'formula' | 'duplicate'>(
-    mode === 'duplicate-ai' ? 'duplicate' : 'all',
+    mode === 'duplicate-ai' ? 'duplicate' : 'formula',
   );
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(100);
@@ -136,9 +169,7 @@ function WorkbenchCase({
   const [previousMode, setPreviousMode] = useState(mode);
   const editable = can(project.role, 'review:run');
   const canTriage = can(project.role, 'finding:triage');
-  const canApprove = ['project_owner', 'workspace_admin', 'approver'].includes(
-    project.role,
-  );
+  const canApprove = can(project.role, 'rule:manage');
   const endpoint = `/api/projects/${project.id}/review`;
   const request = useCallback(
     async <T,>(body?: object, runId?: string): Promise<T> => {
@@ -175,19 +206,27 @@ function WorkbenchCase({
     setProfileId((id) =>
       data.profiles.some((p) => p.id === id)
         ? id
-        : (data.profiles[0]?.id ?? ''),
+        : ((adminSettings
+            ? data.profiles[0]
+            : data.profiles.find((p) => p.status === 'active')
+          )?.id ?? ''),
     );
     return data;
-  }, [request]);
+  }, [request, adminSettings]);
   useEffect(() => {
     let active = true;
     request<ReviewState>()
       .then(async (data) => {
         if (active) {
           setState(data);
-          setProfileId(data.profiles[0]?.id ?? '');
-          setProfile(data.profiles[0]?.profile ?? { ...defaultProfile });
-          const latest = data.runs.find((r) => !r.trial) ?? data.runs[0];
+          const initialProfile = adminSettings
+            ? data.profiles[0]
+            : data.profiles.find((p) => p.status === 'active');
+          setProfileId(initialProfile?.id ?? '');
+          setProfile(initialProfile?.profile ?? { ...defaultProfile });
+          const latest = adminSettings
+            ? undefined
+            : data.runs.find((r) => !r.trial);
           if (latest) {
             const saved = await request<{ run: Run; decisions: Decision[] }>(
               undefined,
@@ -211,7 +250,7 @@ function WorkbenchCase({
     return () => {
       active = false;
     };
-  }, [request]);
+  }, [request, adminSettings]);
   async function perform(label: string, action: () => Promise<void>) {
     if (busy) return;
     setBusy(label);
@@ -235,6 +274,9 @@ function WorkbenchCase({
       ) ?? sheet.suggested,
     );
   }
+  function editMapping(next: Mapping) {
+    setMapping({ ...next, recognition: undefined });
+  }
   function inspect(sourceVersionId: string) {
     if (
       mappingDirty &&
@@ -242,12 +284,83 @@ function WorkbenchCase({
     )
       return;
     void perform('원본 시트 읽는 중', async () => {
+      setOpeningSourceId(sourceVersionId);
+      setInspection(null);
+      setMapping(null);
+      setSheetName('');
       const data = await request<Inspection>({
         action: 'inspect',
         sourceVersionId,
       });
       setInspection(data);
       if (data.sheets[0]) pickSheet(data, data.sheets[0].name);
+    });
+  }
+  function prepareSources() {
+    if (
+      !state ||
+      (mappingDirty &&
+        !window.confirm('저장하지 않은 열 연결 변경을 버리고 자동 확인할까요?'))
+    )
+      return;
+    void perform('자료 자동 확인 중', async () => {
+      setTab('mapping');
+      const mappings = [...state.mappings];
+      const results: Record<string, string> = {};
+      let added = 0;
+      setInspection(null);
+      setMapping(null);
+      setOpeningSourceId('');
+      for (const [index, source] of state.sources.entries()) {
+        setBusy(
+          `자료 확인 ${index + 1}/${state.sources.length} · ${source.filename}`,
+        );
+        try {
+          const data = await request<Inspection>({
+            action: 'inspect',
+            sourceVersionId: source.sourceVersionId,
+          });
+          let ready = 0;
+          for (const sheet of data.sheets) {
+            const existing = mappings.findIndex(
+              (m) =>
+                m.sourceVersionId === source.sourceVersionId &&
+                m.sheet === sheet.name,
+            );
+            if (existing >= 0) {
+              if (mappings[existing]!.confirmed) ready++;
+              continue;
+            }
+            if (!sheet.suggested.confirmed) continue;
+            mappings.push(sheet.suggested);
+            added++;
+            ready++;
+          }
+          results[source.sourceVersionId] = data.sheets.every(
+            (s) => s.suggested.kind === 'reference',
+          )
+            ? '참고자료 · 현재 자동검수 대상 외'
+            : `${ready}/${data.sheets.length}개 시트 인식${ready < data.sheets.length ? ' · 나머지는 개별 확인 필요' : ''}`;
+        } catch (e) {
+          results[source.sourceVersionId] =
+            `읽기 실패 · ${e instanceof Error ? e.message : '다시 시도해 주세요.'}`;
+        }
+        setPreparation({ ...results });
+      }
+      if (added) {
+        setBusy('인식된 자료 구조 저장 중');
+        await request({
+          action: 'mapping',
+          mappings,
+          baseVersionId: state.mappingVersionId,
+        });
+      }
+      await reload();
+      setNotice(
+        added
+          ? `${added}개 시트의 열 연결을 함께 저장했습니다. 확인이 필요한 자료는 목록에 표시했습니다. 수량의 계산 의미까지 확인한 것은 아닙니다.`
+          : '자동 확인을 마쳤습니다. 기존 열 연결은 유지했습니다. 확인 필요·읽기 실패 자료는 아래 목록에서 확인하세요.',
+      );
     });
   }
   function openRun(runId: string) {
@@ -301,6 +414,7 @@ function WorkbenchCase({
   }
   const selectedProfile = state?.profiles.find((p) => p.id === profileId);
   const profileDirty =
+    adminSettings &&
     !!selectedProfile &&
     JSON.stringify(profile) !== JSON.stringify(selectedProfile.profile);
   const savedMapping = state?.mappings.find(
@@ -315,6 +429,19 @@ function WorkbenchCase({
         savedMapping ??
           inspection?.sheets.find((s) => s.name === mapping.sheet)?.suggested,
       );
+  useEffect(() => {
+    if (!onNavigationGuard) return;
+    onNavigationGuard(() => {
+      if (busy) return false;
+      return (
+        !(reason.trim() || mappingDirty || profileDirty) ||
+        window.confirm('저장하지 않은 변경을 버리고 화면을 이동할까요?')
+      );
+    });
+    return () => {
+      onNavigationGuard(null);
+    };
+  }, [onNavigationGuard, busy, reason, mappingDirty, profileDirty]);
   const currentSheet = inspection?.sheets.find((s) => s.name === sheetName);
   const rowsById = useMemo(
     () => new Map(run?.rows.map((r) => [r.id, r]) ?? []),
@@ -323,6 +450,10 @@ function WorkbenchCase({
   const findings =
     run?.findings.filter(
       (f) =>
+        (adminSettings ||
+          (mode === 'duplicate-ai'
+            ? f.ruleId === 'ITEM-018'
+            : f.ruleId !== 'ITEM-018')) &&
         (filter === 'all' ||
           (filter === 'duplicate'
             ? f.ruleId === 'ITEM-018'
@@ -340,6 +471,12 @@ function WorkbenchCase({
   if (previousMode !== mode) {
     setPreviousMode(mode);
     setFilter(mode === 'duplicate-ai' ? 'duplicate' : 'formula');
+    setQuery('');
+    setReason('');
+    setSelectedId('');
+    setVisibleCount(100);
+    setMapping(savedMapping ?? currentSheet?.suggested ?? null);
+    setTab(run ? 'results' : 'mapping');
   }
   const row = selected ? rowsById.get(selected.rowId) : undefined;
   const latestDecisions = new Map(decisions.map((d) => [d.findingId, d]));
@@ -347,8 +484,20 @@ function WorkbenchCase({
     <fieldset className="qc-workbench-controls" disabled={!!busy}>
       <header className="qc-toolbar">
         <div>
-          <h1>원본 근거로 검수하기</h1>
-          <p>자료 구조를 확인하고, 지침을 시험한 뒤 검토 의견을 남깁니다.</p>
+          <h1>
+            {adminSettings
+              ? '검수 지침 관리'
+              : mode === 'duplicate-ai'
+                ? '중복 ITEM AI 검수'
+                : '산출식 AI 검수'}
+          </h1>
+          <p>
+            {adminSettings
+              ? '관리자 전용 · 지침 작성 → 시험 → 활성화. 일반 검수에는 승인된 지침만 적용됩니다.'
+              : mode === 'duplicate-ai'
+                ? '동별집계표의 전체 아이템을 공종에 걸쳐 비교합니다. 중복·공종 분산 후보의 원본을 확인하세요.'
+                : '상세 산출서의 산식과 치수를 확인합니다. 근거가 부족한 항목은 정상으로 처리하지 않습니다.'}
+          </p>
         </div>
         <div className="qc-actions">
           <button
@@ -363,19 +512,33 @@ function WorkbenchCase({
             <RefreshCw />
             새로 확인
           </button>
-          {tab === 'mapping' ? (
-            <button
-              className="qc-primary"
-              disabled={!state?.mappings.some((m) => m.confirmed) || !!busy}
-              onClick={() => setTab('rules')}
-            >
-              지침 설정으로 <ArrowRight />
-            </button>
+          {!adminSettings ? (
+            <>
+              <button
+                disabled={!editable || !!busy || !state?.sources.length}
+                onClick={prepareSources}
+              >
+                자료 자동 확인·저장
+              </button>
+              <button
+                className="qc-primary"
+                disabled={
+                  !editable ||
+                  !!busy ||
+                  selectedProfile?.status !== 'active' ||
+                  !state?.mappings.some((m) => m.confirmed)
+                }
+                onClick={() => execute(false)}
+              >
+                <Play />
+                검수 실행
+              </button>
+            </>
           ) : (
             <button
               className="qc-primary"
               disabled={
-                !editable ||
+                !canApprove ||
                 !profileId ||
                 !!busy ||
                 !state?.mappings.some((m) => m.confirmed)
@@ -402,39 +565,73 @@ function WorkbenchCase({
           )}
         </div>
       </header>
-      <nav className="qc-tabs" aria-label="검수 작업">
-        <button
-          aria-current={tab === 'mapping' ? 'page' : undefined}
-          onClick={() => setTab('mapping')}
-        >
-          1. 자료 구조 확인{' '}
-          <span>
-            {state?.mappings.filter((m) => m.confirmed).length ?? 0}개 시트
-          </span>
-        </button>
-        <button
-          aria-current={tab === 'rules' ? 'page' : undefined}
-          onClick={() => setTab('rules')}
-        >
-          2. 지침 설정·시험{' '}
-          <span>
-            {selectedProfile
-              ? `v${selectedProfile.version} · ${selectedProfile.status === 'active' ? '승인' : '초안'}`
-              : '지침 작성'}
-          </span>
-        </button>
+      <nav
+        className="qc-tabs"
+        aria-label={adminSettings ? '지침 관리' : '검수 작업'}
+      >
+        {!adminSettings && (
+          <button
+            aria-current={tab === 'mapping' ? 'page' : undefined}
+            onClick={() => setTab('mapping')}
+          >
+            자료 확인{' '}
+            <span>
+              {state?.mappings.filter((m) => m.confirmed).length ?? 0}개 시트
+            </span>
+          </button>
+        )}
+        {adminSettings && (
+          <button
+            aria-current={tab === 'rules' ? 'page' : undefined}
+            onClick={() => setTab('rules')}
+          >
+            지침 설정·시험{' '}
+            <span>
+              {selectedProfile
+                ? `v${selectedProfile.version} · ${selectedProfile.status === 'active' ? '승인' : '초안'}`
+                : '지침 작성'}
+            </span>
+          </button>
+        )}
         <button
           aria-current={tab === 'results' ? 'page' : undefined}
           onClick={() => setTab('results')}
         >
-          3. 결과·보고서{' '}
+          {adminSettings ? '시험 결과' : '결과·보고서'}{' '}
           <span>
             {run
-              ? `${run.findings.length}건 · ${run.trial ? '시험' : '정식'}`
+              ? `${findings.length}건 · ${run.trial ? '시험' : '정식'}`
               : '미실행'}
           </span>
         </button>
       </nav>
+      {!adminSettings && state && (
+        <div className="qc-preparation-guide">
+          <p>
+            <strong>
+              {selectedProfile
+                ? `적용 지침: ${selectedProfile.profile.name} · v${selectedProfile.version}`
+                : '승인된 검수 지침이 없습니다.'}
+            </strong>
+          </p>
+          <p>
+            처음 한 번 <strong>자료 자동 확인·저장</strong>을 누르면 표준 양식의
+            열을 함께 연결합니다. 확인이 필요한 시트만 개별 보완하고, 준비된
+            자료로 검수하세요.
+          </p>
+          {!selectedProfile && (
+            <p>
+              관리자가 설정에서 지침을 시험·활성화해야 검수를 실행할 수
+              있습니다.
+            </p>
+          )}
+          {canApprove && onSettings && (
+            <button onClick={onSettings}>
+              설정 · 검수 지침 관리 <ArrowRight />
+            </button>
+          )}
+        </div>
+      )}
       {busy && (
         <output className="qc-notice">
           {busy}… 완료 전에는 다른 변경을 할 수 없습니다.
@@ -463,13 +660,11 @@ function WorkbenchCase({
             <h2>
               등록된 원본 <span>{state.sources.length}</span>
             </h2>
-            <p>파일을 선택해 시트와 열을 확인하세요.</p>
+            <p>자동 인식 결과를 확인하거나 필요한 파일만 열어 보세요.</p>
             {state.sources.map((s) => (
               <button
                 key={s.sourceVersionId}
-                aria-pressed={
-                  inspection?.source.sourceVersionId === s.sourceVersionId
-                }
+                aria-pressed={openingSourceId === s.sourceVersionId}
                 disabled={!!busy}
                 onClick={() => inspect(s.sourceVersionId)}
               >
@@ -477,11 +672,14 @@ function WorkbenchCase({
                 <span>
                   <strong>{s.filename}</strong>
                   <small>
-                    {state.mappings.filter(
-                      (m) =>
-                        m.sourceVersionId === s.sourceVersionId && m.confirmed,
-                    ).length || 0}
-                    개 시트 확인 · {s.sourceVersionId.slice(0, 8)}
+                    {preparation[s.sourceVersionId] ??
+                      `${
+                        state.mappings.filter(
+                          (m) =>
+                            m.sourceVersionId === s.sourceVersionId &&
+                            m.confirmed,
+                        ).length || 0
+                      }개 시트 저장`}
                   </small>
                 </span>
               </button>
@@ -497,10 +695,17 @@ function WorkbenchCase({
             {!inspection || !mapping || !currentSheet ? (
               <div className="qc-empty">
                 <FileSearch />
-                <h2>어떤 숫자인지 먼저 확인합니다</h2>
+                <h2>
+                  {openingSourceId
+                    ? '선택한 파일을 확인해 주세요'
+                    : mode === 'duplicate-ai'
+                      ? '동별집계표가 중복 검수의 기준 자료입니다'
+                      : '산출서를 한 번에 준비하세요'}
+                </h2>
                 <p>
-                  왼쪽 원본을 선택하면 실제 저장 파일의 시트와 행을 읽습니다.
-                  자동 제안은 아직 확정된 매핑이 아닙니다.
+                  {openingSourceId
+                    ? '읽는 중이거나 읽기에 실패한 파일입니다. 이전 파일의 내용을 대신 표시하지 않습니다.'
+                    : '상단의 자료 자동 확인·저장으로 시작하세요. 표준 양식은 파일마다 저장할 필요가 없습니다. 직접 열 연결은 비표준 양식이나 수정할 때만 사용합니다.'}
                 </p>
                 <ul>
                   <li>상세 산출서: 산식·치수·물량 검사</li>
@@ -537,13 +742,13 @@ function WorkbenchCase({
                         });
                         await reload();
                         setNotice(
-                          '시트·열 의미를 새 매핑 버전으로 저장했습니다. 다음은 지침 설정입니다.',
+                          '열 연결을 새 버전으로 저장했습니다. 상단에서 승인된 지침으로 검수할 수 있습니다.',
                         );
                       })
                     }
                   >
                     <Save />
-                    매핑 저장
+                    열 연결 저장
                   </button>
                 </div>
                 <div className="qc-form-grid">
@@ -571,7 +776,7 @@ function WorkbenchCase({
                     <select
                       value={mapping.kind}
                       onChange={(e) =>
-                        setMapping({
+                        editMapping({
                           ...mapping,
                           confirmed: false,
                           kind: e.target.value as Mapping['kind'],
@@ -591,7 +796,7 @@ function WorkbenchCase({
                       max="1000"
                       value={mapping.headerRow}
                       onChange={(e) =>
-                        setMapping({
+                        editMapping({
                           ...mapping,
                           confirmed: false,
                           headerRow: Number(e.target.value),
@@ -648,140 +853,147 @@ function WorkbenchCase({
                   {currentSheet.preview.length}행. 병합·문맥·변수의 자동 의미
                   추정은 하지 않습니다.
                 </p>
-                <div className="qc-mapping-grid">
-                  {fields.map((f) => (
-                    <label key={f}>
-                      {fieldLabels[f]}
-                      <select
-                        value={mapping.columns[f] ?? ''}
-                        onChange={(e) =>
-                          setMapping({
-                            ...mapping,
-                            confirmed: false,
-                            columns: {
-                              ...mapping.columns,
-                              [f]:
-                                e.target.value === ''
-                                  ? null
-                                  : Number(e.target.value),
-                            },
-                          })
-                        }
-                      >
-                        <option value="">없음 / 미확인</option>
-                        {Array.from(
-                          {
-                            length: Math.max(
-                              ...currentSheet.preview.map(
-                                (r) => r.cells.length,
-                              ),
-                              1,
-                            ),
-                          },
-                          (_, i) => (
-                            <option key={i} value={i}>
-                              {columnName(i)} ·{' '}
-                              {currentSheet.preview.find(
-                                (r) => r.number === mapping.headerRow,
-                              )?.cells[i] || '이름 없음'}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-                  ))}
-                </div>
                 <details className="qc-details">
-                  <summary>치수·비교집단 및 수량 계산 기준</summary>
-                  <div className="qc-form-grid">
-                    <label>
-                      기재 물량의 의미
-                      <select
-                        value={mapping.arithmeticBasis}
-                        onChange={(e) =>
-                          setMapping({
-                            ...mapping,
-                            confirmed: false,
-                            arithmeticBasis: e.target
-                              .value as Mapping['arithmeticBasis'],
-                          })
-                        }
-                      >
-                        <option value="unknown">
-                          환산·개소 적용 단계 미확인
-                        </option>
-                        <option value="formula-result">
-                          이 열은 표시 산식의 직접 결과
-                        </option>
-                      </select>
-                    </label>
-                    <label>
-                      치수 열의 역할
-                      <select
-                        value={mapping.dimensionRole}
-                        onChange={(e) =>
-                          setMapping({
-                            ...mapping,
-                            confirmed: false,
-                            dimensionRole: e.target
-                              .value as Mapping['dimensionRole'],
-                          })
-                        }
-                      >
-                        <option value="unknown">미확인</option>
-                        <option value="length">길이</option>
-                        <option value="height">높이</option>
-                        <option value="thickness">두께</option>
-                        <option value="count">개소</option>
-                      </select>
-                    </label>
-                    <label>
-                      치수 단위
+                  <summary>
+                    열 연결 직접 수정 · 비표준 양식 또는 의미 확인이 필요할 때
+                  </summary>
+                  <div className="qc-mapping-grid">
+                    {fields.map((f) => (
+                      <label key={f}>
+                        {fieldLabels[f]}
+                        <select
+                          value={mapping.columns[f] ?? ''}
+                          onChange={(e) =>
+                            editMapping({
+                              ...mapping,
+                              confirmed: false,
+                              columns: {
+                                ...mapping.columns,
+                                [f]:
+                                  e.target.value === ''
+                                    ? null
+                                    : Number(e.target.value),
+                              },
+                            })
+                          }
+                        >
+                          <option value="">없음 / 미확인</option>
+                          {Array.from(
+                            {
+                              length: Math.max(
+                                ...currentSheet.preview.map(
+                                  (r) => r.cells.length,
+                                ),
+                                1,
+                              ),
+                            },
+                            (_, i) => (
+                              <option key={i} value={i}>
+                                {columnName(i)} ·{' '}
+                                {currentSheet.preview.find(
+                                  (r) => r.number === mapping.headerRow,
+                                )?.cells[i] || '이름 없음'}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  <details className="qc-details">
+                    <summary>치수·비교집단 및 수량 계산 기준</summary>
+                    <div className="qc-form-grid">
+                      <label>
+                        기재 물량의 의미
+                        <select
+                          value={mapping.arithmeticBasis}
+                          onChange={(e) =>
+                            editMapping({
+                              ...mapping,
+                              confirmed: false,
+                              arithmeticBasis: e.target
+                                .value as Mapping['arithmeticBasis'],
+                            })
+                          }
+                        >
+                          <option value="unknown">
+                            환산·개소 적용 단계 미확인
+                          </option>
+                          <option value="formula-result">
+                            이 열은 표시 산식의 직접 결과
+                          </option>
+                        </select>
+                      </label>
+                      <label>
+                        치수 열의 역할
+                        <select
+                          value={mapping.dimensionRole}
+                          onChange={(e) =>
+                            editMapping({
+                              ...mapping,
+                              confirmed: false,
+                              dimensionRole: e.target
+                                .value as Mapping['dimensionRole'],
+                            })
+                          }
+                        >
+                          <option value="unknown">미확인</option>
+                          <option value="length">길이</option>
+                          <option value="height">높이</option>
+                          <option value="thickness">두께</option>
+                          <option value="count">개소</option>
+                        </select>
+                      </label>
+                      <label>
+                        치수 단위
+                        <input
+                          value={mapping.dimensionUnit}
+                          placeholder="m / mm / EA"
+                          onChange={(e) =>
+                            editMapping({
+                              ...mapping,
+                              confirmed: false,
+                              dimensionUnit: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <label className="qc-checkbox">
                       <input
-                        value={mapping.dimensionUnit}
-                        placeholder="m / mm / EA"
+                        type="checkbox"
+                        checked={mapping.cohortConfirmed}
                         onChange={(e) =>
-                          setMapping({
+                          editMapping({
                             ...mapping,
                             confirmed: false,
-                            dimensionUnit: e.target.value,
+                            cohortConfirmed: e.target.checked,
                           })
                         }
                       />
+                      비교집단 열이 동일 실 유형·부위·치수 의미·산출 방식을
+                      구분함을 확인했습니다.
                     </label>
-                  </div>
-                  <label className="qc-checkbox">
+                  </details>
+                  <label className="qc-confirm">
                     <input
                       type="checkbox"
-                      checked={mapping.cohortConfirmed}
+                      disabled={!editable}
+                      checked={mapping.confirmed}
                       onChange={(e) =>
-                        setMapping({
-                          ...mapping,
-                          confirmed: false,
-                          cohortConfirmed: e.target.checked,
-                        })
+                        editMapping({ ...mapping, confirmed: e.target.checked })
                       }
                     />
-                    비교집단 열이 동일 실 유형·부위·치수 의미·산출 방식을
-                    구분함을 확인했습니다.
+                    {mapping.recognition
+                      ? '표준 FIN 머리글 자동 인식 · 치수 및 계산 의미는 별도 확인합니다.'
+                      : '이 시트의 머리글·열 의미·자료 역할을 원본과 대조했습니다.'}
                   </label>
                 </details>
-                <label className="qc-confirm">
-                  <input
-                    type="checkbox"
-                    disabled={!editable}
-                    checked={mapping.confirmed}
-                    onChange={(e) =>
-                      setMapping({ ...mapping, confirmed: e.target.checked })
-                    }
-                  />
-                  이 시트의 머리글·열 의미·자료 역할을 원본과 대조했습니다.
-                </label>
               </>
             )}
           </section>
         </div>
-      ) : tab === 'rules' ? (
+      ) : tab === 'rules' && adminSettings && canApprove ? (
         <section className="qc-rules">
           <div className="qc-section-heading">
             <div>
@@ -998,7 +1210,7 @@ function WorkbenchCase({
               </fieldset>
               <button
                 className="qc-primary"
-                disabled={!editable || !!busy}
+                disabled={!canApprove || !!busy}
                 onClick={() =>
                   void perform('지침 초안 저장 중', async () => {
                     const saved = await request<{ id: string }>({
@@ -1080,7 +1292,13 @@ function WorkbenchCase({
         <section className="qc-results">
           <div className="qc-section-heading">
             <div>
-              <h2>검수 결과와 원본 대조</h2>
+              <h2>
+                {adminSettings
+                  ? '시험 결과와 원본 대조'
+                  : mode === 'duplicate-ai'
+                    ? '중복·공종 분산 후보와 원본 대조'
+                    : '산출식·치수 검토와 원본 대조'}
+              </h2>
               <p>
                 {run
                   ? `${date(run.createdAt)} · 지침 v${run.profileVersion} · ${run.trial ? '시험 결과 (판단 기록 불가)' : '정식 검수'} · ${run.id.slice(0, 8)}`
@@ -1098,12 +1316,14 @@ function WorkbenchCase({
                   }}
                 >
                   <option value="">실행 선택</option>
-                  {state.runs.map((r) => (
-                    <option value={r.id} key={r.id}>
-                      {date(r.createdAt)} · v{r.profileVersion} ·{' '}
-                      {r.trial ? '시험' : '정식'} · {r.findingCount}건
-                    </option>
-                  ))}
+                  {state.runs
+                    .filter((r) => adminSettings || !r.trial)
+                    .map((r) => (
+                      <option value={r.id} key={r.id}>
+                        {date(r.createdAt)} · v{r.profileVersion} ·{' '}
+                        {r.trial ? '시험' : '정식'} · {r.findingCount}건
+                      </option>
+                    ))}
                 </select>
               </label>
               {run ? (
@@ -1126,13 +1346,21 @@ function WorkbenchCase({
           {run ? (
             <>
               <div className="qc-coverage">
-                {run.coverage.map((c) => (
-                  <div key={c.ruleId}>
-                    <strong>{c.label}</strong>
-                    <span>평가 {c.evaluated.toLocaleString()}행</span>
-                    <b>미평가 {c.unevaluated.toLocaleString()}행</b>
-                  </div>
-                ))}
+                {run.coverage
+                  .filter(
+                    (c) =>
+                      adminSettings ||
+                      (mode === 'duplicate-ai'
+                        ? c.ruleId === 'ITEM-018'
+                        : c.ruleId !== 'ITEM-018'),
+                  )
+                  .map((c) => (
+                    <div key={c.ruleId}>
+                      <strong>{c.label}</strong>
+                      <span>평가 {c.evaluated.toLocaleString()}행</span>
+                      <b>미평가 {c.unevaluated.toLocaleString()}행</b>
+                    </div>
+                  ))}
               </div>
               <details className="qc-details">
                 <summary>미평가 사유·검수 제한 · 반드시 확인</summary>
@@ -1147,54 +1375,65 @@ function WorkbenchCase({
                 ))}
               </details>
               <div className="qc-result-filters">
-                <button
-                  aria-pressed={filter === 'all'}
-                  onClick={() => {
-                    if (
-                      !reason.trim() ||
-                      window.confirm(
-                        '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
-                      )
-                    ) {
-                      setReason('');
-                      setFilter('all');
-                    }
-                  }}
-                >
-                  전체 {run.findings.length}
-                </button>
-                <button
-                  aria-pressed={filter === 'formula'}
-                  onClick={() => {
-                    if (
-                      !reason.trim() ||
-                      window.confirm(
-                        '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
-                      )
-                    ) {
-                      setReason('');
-                      setFilter('formula');
-                    }
-                  }}
-                >
-                  산출식·치수
-                </button>
-                <button
-                  aria-pressed={filter === 'duplicate'}
-                  onClick={() => {
-                    if (
-                      !reason.trim() ||
-                      window.confirm(
-                        '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
-                      )
-                    ) {
-                      setReason('');
-                      setFilter('duplicate');
-                    }
-                  }}
-                >
-                  중복·공종 분산
-                </button>
+                {adminSettings ? (
+                  <>
+                    <button
+                      aria-pressed={filter === 'all'}
+                      onClick={() => {
+                        if (
+                          !reason.trim() ||
+                          window.confirm(
+                            '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
+                          )
+                        ) {
+                          setReason('');
+                          setFilter('all');
+                        }
+                      }}
+                    >
+                      전체 {run.findings.length}
+                    </button>
+                    <button
+                      aria-pressed={filter === 'formula'}
+                      onClick={() => {
+                        if (
+                          !reason.trim() ||
+                          window.confirm(
+                            '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
+                          )
+                        ) {
+                          setReason('');
+                          setFilter('formula');
+                        }
+                      }}
+                    >
+                      산출식·치수
+                    </button>
+                    <button
+                      aria-pressed={filter === 'duplicate'}
+                      onClick={() => {
+                        if (
+                          !reason.trim() ||
+                          window.confirm(
+                            '저장하지 않은 판단 사유를 버리고 필터를 바꿀까요?',
+                          )
+                        ) {
+                          setReason('');
+                          setFilter('duplicate');
+                        }
+                      }}
+                    >
+                      중복·공종 분산
+                    </button>
+                  </>
+                ) : (
+                  <strong>
+                    {mode === 'duplicate-ai'
+                      ? '중복·공종 분산 후보'
+                      : '산출식·치수 검토'}{' '}
+                    {findings.length}건
+                  </strong>
+                )}
                 <input
                   aria-label="검토 항목 검색"
                   placeholder="품명·검토 내용 검색"

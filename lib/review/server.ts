@@ -96,14 +96,11 @@ export class ReviewService {
       );
     if (write && !can(row.role as ProjectRole, 'finding:triage'))
       fail(403, 'REVIEW_WRITE_DENIED', '검수 변경 권한이 없습니다.');
-    if (
-      approve &&
-      !['workspace_admin', 'project_owner', 'approver'].includes(row.role)
-    )
+    if (approve && !can(row.role as ProjectRole, 'rule:manage'))
       fail(
         403,
         'APPROVAL_DENIED',
-        '지침 승인은 프로젝트 책임자·승인자만 가능합니다.',
+        '지침 설정·시험·활성화는 관리자만 가능합니다.',
       );
     if (row.discipline !== 'FIN')
       fail(
@@ -142,7 +139,8 @@ export class ReviewService {
     projectId: string,
     caseId: string,
   ): Promise<ReviewState> {
-    await this.authorize(actor, projectId, caseId);
+    const member = await this.authorize(actor, projectId, caseId);
+    const admin = can(member.role as ProjectRole, 'rule:manage');
     const sources = await this.sources(actor, projectId, caseId);
     const profiles = await this.db
       .prepare(
@@ -179,22 +177,26 @@ export class ReviewService {
     return {
       sources,
       mappingVersionId: mapping?.id ?? null,
-      profiles: profiles.results.map((p) => ({
-        id: p.id,
-        version: p.version,
-        status: p.approval_id ? 'active' : 'draft',
-        profile: profileSchema.parse(JSON.parse(p.profile_json)),
-        createdAt: p.created_at,
-        trialRunId: p.trial_run_id,
-      })),
-      runs: runs.results.map((r) => ({
-        id: r.id,
-        createdAt: r.created_at,
-        profileVersion: r.profile_version,
-        trial: !!r.trial,
-        findingCount: r.finding_count,
-        rowCount: r.row_count,
-      })),
+      profiles: profiles.results
+        .filter((p) => admin || p.approval_id)
+        .map((p) => ({
+          id: p.id,
+          version: p.version,
+          status: p.approval_id ? 'active' : 'draft',
+          profile: profileSchema.parse(JSON.parse(p.profile_json)),
+          createdAt: p.created_at,
+          trialRunId: admin ? p.trial_run_id : null,
+        })),
+      runs: runs.results
+        .filter((r) => admin || !r.trial)
+        .map((r) => ({
+          id: r.id,
+          createdAt: r.created_at,
+          profileVersion: r.profile_version,
+          trial: !!r.trial,
+          findingCount: r.finding_count,
+          rowCount: r.row_count,
+        })),
       mappings: mapping
         ? z
             .array(mappingSchema)
@@ -219,9 +221,9 @@ export class ReviewService {
     });
     if (!stored)
       fail(404, 'SOURCE_NOT_FOUND', '저장된 원본을 찾지 못했습니다.');
-    if (stored.size > 8 * 1024 * 1024)
+    if (stored.size > 20 * 1024 * 1024)
       throw new WorkbookError(
-        '현재 내용 검수 한도는 파일당 8MB입니다. 저장된 원본은 보존되며 파일 분할이 필요합니다.',
+        '파일당 검수 한도 20MB를 넘었습니다. 저장된 원본은 보존됩니다.',
       );
     const bytes = await new Response(stored.body).arrayBuffer();
     if (
@@ -308,16 +310,22 @@ export class ReviewService {
     caseId: string,
     runId: string,
   ): Promise<{ run: Run; decisions: Decision[] }> {
-    await this.authorize(actor, projectId, caseId);
+    const member = await this.authorize(actor, projectId, caseId);
     z.uuid().parse(runId);
     const record = await this.db
       .prepare(
-        'SELECT object_key,sha256 FROM qc_review_run WHERE id=? AND project_id=? AND case_id=?',
+        'SELECT object_key,sha256,trial FROM qc_review_run WHERE id=? AND project_id=? AND case_id=?',
       )
       .bind(runId, projectId, caseId)
-      .first<{ object_key: string; sha256: string }>();
+      .first<{ object_key: string; sha256: string; trial: number }>();
     if (!record || !env.FILES)
       fail(404, 'RUN_NOT_FOUND', '저장된 검수 실행을 찾지 못했습니다.');
+    if (record.trial && !can(member.role as ProjectRole, 'rule:manage'))
+      fail(
+        403,
+        'RULE_ADMIN_REQUIRED',
+        '지침 시험 결과는 관리자만 확인할 수 있습니다.',
+      );
     const object = await env.FILES.get(record.object_key);
     if (!object || object.size > 24 * 1024 * 1024)
       fail(409, 'RUN_UNAVAILABLE', '검수 근거 파일을 읽을 수 없습니다.');
@@ -368,7 +376,9 @@ export class ReviewService {
       projectId,
       caseId,
       input.action !== 'inspect',
-      input.action === 'approve',
+      input.action === 'approve' ||
+        input.action === 'profile' ||
+        (input.action === 'run' && input.trial),
     );
     if (
       ['mapping', 'profile', 'run'].includes(input.action) &&
@@ -451,6 +461,7 @@ export class ReviewService {
             projectId,
           ),
         requestId,
+        true,
       );
       return { id };
     }
@@ -680,6 +691,7 @@ export class ReviewService {
           createdAt,
         ),
       requestId,
+      input.trial,
     );
     return { run, decisions: [] };
   }

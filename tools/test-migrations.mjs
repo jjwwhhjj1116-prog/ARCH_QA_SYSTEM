@@ -63,6 +63,8 @@ try {
   const second = run(baseArgs);
   if (!first.includes('0005_fin_review_workstation.sql'))
     throw new Error('review workstation migration was not applied');
+  if (!first.includes('0006_qc_guideline_admin.sql'))
+    throw new Error('guideline administrator migration was not applied');
   if (!first.includes('0004_source_package_replacement.sql')) {
     throw new Error('replacement migration was not applied');
   }

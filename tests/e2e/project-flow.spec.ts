@@ -108,7 +108,10 @@ test('project page exposes the full Korean workflow and persists a new project',
     {
       name: 'ＵＩ내부산출서.csv',
       mimeType: 'text/csv',
-      buffer: Buffer.from('품명,수량\n도장,12.5\n', 'utf8'),
+      buffer: Buffer.from(
+        '내부산출서\n부위,품명,규격,단위,산식,물량\n벽,도장,수성,M2,12.5,12.5\n',
+        'utf8',
+      ),
     },
     {
       name: 'UI동별집계표.csv',
@@ -143,6 +146,39 @@ test('project page exposes the full Korean workflow and persists a new project',
   await expect(
     aiChooser.getByRole('button', { name: /중복 ITEM AI 검수/u }),
   ).toBeVisible();
+  await page
+    .getByRole('button', { name: '자료 자동 확인·저장', exact: true })
+    .click();
+  await expect(page.getByRole('status')).toContainText(
+    '1개 시트의 열 연결을 함께 저장',
+  );
+  await expect(
+    page.getByRole('button', { name: /자료 확인 1개 시트/u }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /지침 설정·시험/u }),
+  ).toHaveCount(0);
+  await aiChooser
+    .getByRole('button', { name: '중복 ITEM AI 검수', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: '중복 ITEM AI 검수', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      name: '동별집계표가 중복 검수의 기준 자료입니다',
+    }),
+  ).toBeVisible();
+  await aiChooser
+    .getByRole('button', { name: '산출식 AI 검수', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: '산출식 AI 검수', exact: true }),
+  ).toBeVisible();
+  const reviewResults = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(reviewResults.violations).toEqual([]);
   const projectsResponse = await page.request.get('/api/projects');
   expect(projectsResponse.status()).toBe(200);
   const projectsBody = (await projectsResponse.json()) as {

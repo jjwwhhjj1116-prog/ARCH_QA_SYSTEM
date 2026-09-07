@@ -6,12 +6,14 @@ export type ProjectAction =
   | 'case:create'
   | 'source:upload'
   | 'review:run'
+  | 'rule:manage'
   | 'finding:triage'
   | 'report:approve'
   | 'member:manage';
 
 const grants: Record<ProjectRole, ReadonlySet<ProjectAction>> = {
   workspace_admin: new Set([
+    'rule:manage',
     'project:read',
     'project:update',
     'case:create',
@@ -22,6 +24,7 @@ const grants: Record<ProjectRole, ReadonlySet<ProjectAction>> = {
     'member:manage',
   ]),
   project_owner: new Set([
+    'rule:manage',
     'project:read',
     'project:update',
     'case:create',

@@ -41,6 +41,7 @@ import {
 import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewWorkbench } from './review-workbench';
+import { can } from '@/lib/domain/permissions';
 import {
   ProjectArchiveDialog,
   ProjectCreationForm,
@@ -84,6 +85,16 @@ export function ReviewStudio({
   );
   const [mobileNav, setMobileNav] = useState(false);
   const [activeView, setActiveView] = useState<StudioView>('project-register');
+  const [settingsSection, setSettingsSection] = useState<'general' | 'rules'>(
+    'general',
+  );
+  const reviewNavigationGuard = useRef<(() => boolean) | null>(null);
+  const registerReviewNavigationGuard = useCallback(
+    (guard: (() => boolean) | null) => {
+      reviewNavigationGuard.current = guard;
+    },
+    [],
+  );
   const [query, setQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
@@ -144,6 +155,8 @@ export function ReviewStudio({
 
   const navigate = useCallback(
     (view: StudioView) => {
+      if (reviewNavigationGuard.current && !reviewNavigationGuard.current())
+        return false;
       setActiveView(view);
       if (mobileNav) {
         setMobileNav(false);
@@ -152,12 +165,15 @@ export function ReviewStudio({
         mainHeadingRef.current?.focus({ preventScroll: true });
         scrollPageToTop();
       }, 0);
+      return true;
     },
     [mobileNav],
   );
 
   const selectProject = useCallback((projectId: string) => {
     if (uploadingRef.current) return;
+    if (reviewNavigationGuard.current && !reviewNavigationGuard.current())
+      return;
     setMobileNav(false);
     setReviewCaseId(null);
     if (selectedProjectIdRef.current !== projectId) {
@@ -1358,12 +1374,77 @@ export function ReviewStudio({
               cases={reviewCases}
               initialCaseId={reviewCaseId ?? uploadCaseId}
               mode={activeView}
+              navigationGuard={reviewNavigationGuard}
+              onNavigationGuard={registerReviewNavigationGuard}
+              onSettings={() => {
+                if (
+                  reviewNavigationGuard.current &&
+                  !reviewNavigationGuard.current()
+                )
+                  return;
+                setSettingsSection('rules');
+                setActiveView('settings');
+                scrollPageToTop();
+              }}
               onCaseChange={setReviewCaseId}
               onSources={() => {
-                navigate('project-data');
-                if (reviewCaseId) openSourceUpload(reviewCaseId);
+                if (navigate('project-data') && reviewCaseId)
+                  openSourceUpload(reviewCaseId);
               }}
             />
+          ) : activeView === 'settings' ? (
+            <div className="qc-settings-workspace">
+              <nav className="qc-tabs" aria-label="설정 메뉴">
+                <button
+                  aria-current={
+                    settingsSection === 'general' ? 'page' : undefined
+                  }
+                  onClick={() => {
+                    if (
+                      !reviewNavigationGuard.current ||
+                      reviewNavigationGuard.current()
+                    )
+                      setSettingsSection('general');
+                  }}
+                >
+                  연동 및 상태
+                </button>
+                {selectedProject &&
+                  can(selectedProject.role, 'rule:manage') && (
+                    <button
+                      aria-current={
+                        settingsSection === 'rules' ? 'page' : undefined
+                      }
+                      onClick={() => setSettingsSection('rules')}
+                    >
+                      검수 지침 관리 · 관리자
+                    </button>
+                  )}
+              </nav>
+              {settingsSection === 'rules' &&
+              selectedProject &&
+              can(selectedProject.role, 'rule:manage') ? (
+                <ReviewWorkbench
+                  key={`rules-${selectedProject.id}`}
+                  project={selectedProject}
+                  cases={reviewCases}
+                  initialCaseId={reviewCaseId ?? uploadCaseId}
+                  mode="formula-ai"
+                  adminSettings
+                  navigationGuard={reviewNavigationGuard}
+                  onNavigationGuard={registerReviewNavigationGuard}
+                  onCaseChange={setReviewCaseId}
+                  onSources={() => navigate('project-data')}
+                />
+              ) : (
+                <ModuleWorkspace
+                  view="settings"
+                  selectedProject={selectedProject}
+                  reviewCases={reviewCases}
+                  onOpenProjects={() => navigate('project-register')}
+                />
+              )}
+            </div>
           ) : (
             <ModuleWorkspace
               view={activeView}

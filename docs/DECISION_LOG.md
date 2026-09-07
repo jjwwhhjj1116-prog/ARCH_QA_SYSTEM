@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-09-07 — Review preparation and admin-only guideline settings
+
+ADR-008 supersedes the normal-workflow guideline tab and per-sheet standard-header
+confirmation. One batch prepares safely recognized labels; uncertain semantics stay
+unreviewable. Stream large XLSX XML with independent resource guards. Guideline
+draft/trial/activation moves to administrator Settings with additive DB guards.
+Formula/duplicate mode changes must be observable before and after execution.
+Tutorial remains explicitly deferred. No production publication authorization yet.
+
 ## 2026-09-07 — Actual FIN evidence workstation and private publishing
 
 User explicitly requests a major UI/review rebuild, staged global skills, subagents and deployment. ADR-007 and `CONCOST_QC_WORKSTATION_GUIDE.md` define the bounded first implementation. Add mapping/profile/run/approval/decision immutable records (0005) with atomic role/CAS guards. Owner activation of a tested guideline is configuration authorization, not report approval; final report/self-approval remains unavailable. No automated source correction. Four implemented rule families plus unreviewable parsing, not a claim that all 20 proposed checks work. AI semantic classification, variable resolution and drawing/quantity correctness remain needs-domain-validation.

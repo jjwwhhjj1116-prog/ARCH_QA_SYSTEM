@@ -10,7 +10,7 @@ function database() {
     for (const statement of readFileSync('drizzle/' + name, 'utf8').split(
       '--> statement-breakpoint',
     )) {
-      if (name === '0005_fin_review_workstation.sql')
+      if (name.startsWith('0005_') || name.startsWith('0006_'))
         db.prepare(statement.trim()).run();
       else db.exec(statement);
     }
@@ -20,6 +20,41 @@ function database() {
   return db;
 }
 describe('review SQLite guards', () => {
+  it.each(['reviewer', 'approver', 'viewer'])(
+    'blocks %s from guideline writes and trial runs, retaining history',
+    (role) => {
+      const db = database();
+      try {
+        db.exec(
+          "INSERT INTO qc_profile_version VALUES ('v','p',1,'{}','u','now'); INSERT INTO qc_review_run VALUES ('trial','p','c','v',1,1,'trialkey','hash',1,1,'u','now');",
+        );
+        db.prepare('UPDATE project_member SET role=? WHERE id=?').run(
+          role,
+          'm',
+        );
+        expect(() =>
+          db.exec(
+            "INSERT INTO qc_profile_version VALUES ('v2','p',2,'{}','u','now')",
+          ),
+        ).toThrow('QC_PERMISSION_CHANGED');
+        expect(() =>
+          db.exec(
+            "INSERT INTO qc_profile_approval VALUES ('a','p','v','trial','u','now')",
+          ),
+        ).toThrow('QC_PERMISSION_CHANGED');
+        expect(() =>
+          db.exec(
+            "INSERT INTO qc_review_run VALUES ('trial2','p','c','v',1,1,'trial2key','hash',1,1,'u','now')",
+          ),
+        ).toThrow('QC_PERMISSION_CHANGED');
+        expect(
+          db.prepare('SELECT count(*) AS n FROM qc_review_run').get()?.n,
+        ).toBe(1);
+      } finally {
+        db.close();
+      }
+    },
+  );
   it('keeps profile history immutable and rechecks live membership', () => {
     const db = database();
     try {
