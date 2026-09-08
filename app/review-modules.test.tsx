@@ -187,7 +187,7 @@ describe('ModuleWorkspace', () => {
       screen.getByRole('heading', { name: '개인 Gemini API 연결' }),
     ).toBeVisible();
     expect(screen.queryByText('N/A · 미구현')).not.toBeInTheDocument();
-    expect(screen.getByText('미연결')).toBeVisible();
+    expect(screen.getByText('확인 중')).toBeVisible();
     expect(screen.getByLabelText('Gemini API 키')).toHaveAttribute(
       'type',
       'password',

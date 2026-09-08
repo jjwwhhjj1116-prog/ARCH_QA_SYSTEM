@@ -43,16 +43,23 @@ it('saves through the real form, clears input, preserves key on error, and confi
   vi.stubGlobal('fetch', fetcher);
   render(<PersonalAiSettings isAdmin={false} />);
   const save = await screen.findByRole('button', { name: '연결 확인 후 저장' });
-  await waitFor(() => expect(save).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByLabelText('Gemini API 키')).toBeEnabled(),
+  );
+  expect(save).toBeDisabled();
   expect(screen.getByLabelText('사용할 모델')).toHaveValue('gemini-3.8-flash');
   const input = screen.getByLabelText('Gemini API 키');
-  fireEvent.change(input, { target: { value: 'synthetic-ui-key-not-real' } });
+  const dottedKey = `AQ.${'a'.repeat(300)}`;
+  expect(input).toHaveAttribute('maxlength', '512');
+  fireEvent.change(input, { target: { value: dottedKey } });
+  expect(save).toBeEnabled();
   fireEvent.click(save);
   await screen.findByText(/연결 확인 및 저장 완료/);
   expect(JSON.parse(fetcher.mock.calls[1][1].body).model).toBe(
     'gemini-3.8-flash',
   );
   expect(input).toHaveValue('');
+  expect(JSON.parse(fetcher.mock.calls[1][1].body).apiKey).toBe(dottedKey);
   fireEvent.change(input, { target: { value: 'replacement-ui-key-not-real' } });
   fireEvent.click(save);
   await screen.findByText('인증 실패');

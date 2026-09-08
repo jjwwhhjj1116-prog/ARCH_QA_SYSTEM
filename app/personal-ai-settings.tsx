@@ -14,9 +14,15 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [operation, setOperation] = useState('GET');
+  const dirty =
+    Boolean(apiKey) || Boolean(status?.configured && model !== status.model);
 
   async function request(method = 'GET') {
+    setOperation(method);
     setBusy(true);
+    setFields({});
     setError(false);
     setMessage('');
     try {
@@ -40,8 +46,9 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
       });
       const body = (await response.json()) as {
         data: PersonalAiStatus;
-        error?: { message: string };
+        error?: { message: string; fields?: Record<string, string> };
       };
+      if (body.error?.fields) setFields(body.error.fields);
       if (!response.ok || body.error)
         throw new Error(
           body.error?.message ??
@@ -116,6 +123,28 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <div className="settings-workspace">
+      <header className="qc-settings-heading">
+        <div>
+          <h1>{t('설정', 'Cài đặt')}</h1>
+          <p>
+            {t(
+              '내 API 연결과 작업 환경을 관리합니다.',
+              'Quản lý API cá nhân và môi trường làm việc.',
+            )}
+          </p>
+        </div>
+        <span
+          className="qc-settings-security"
+          data-ready={Boolean(status?.storageReady)}
+        >
+          <ShieldCheck aria-hidden="true" />
+          {status?.storageReady
+            ? t('암호화 저장 준비됨', 'Sẵn sàng lưu mã hóa')
+            : busy
+              ? t('저장소 확인 중', 'Đang kiểm tra kho lưu')
+              : t('저장소 설정 필요', 'Cần cấu hình kho lưu')}
+        </span>
+      </header>
       <section
         className="settings-card personal-ai-settings"
         aria-labelledby="personal-ai-title"
@@ -134,96 +163,177 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
             </p>
           </div>
           <span
-            className={`status-badge ${status?.configured ? 'status-ready' : 'status-pending'}`}
+            className={`qc-connection-state ${error ? 'is-error' : dirty ? 'is-dirty' : status?.configured ? 'is-connected' : ''}`}
           >
-            {status?.configured
-              ? t('키 저장됨', 'Đã lưu khóa')
-              : t('미연결', 'Chưa kết nối')}
+            {busy
+              ? t('확인 중', 'Đang kiểm tra')
+              : error
+                ? t('확인 필요 · 저장 실패', 'Cần kiểm tra · Chưa lưu')
+                : dirty
+                  ? t('변경사항 미저장', 'Thay đổi chưa lưu')
+                  : status?.configured
+                    ? t('연결 확인됨', 'Đã xác thực')
+                    : t('연결 전', 'Chưa kết nối')}
           </span>
         </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void request('PUT');
-          }}
-        >
-          <fieldset disabled={busy}>
-            <label htmlFor="personal-gemini-key">
-              {t('Gemini API 키', 'Khóa Gemini API')}
-            </label>
-            <input
-              id="personal-gemini-key"
-              type="password"
-              autoComplete="new-password"
-              spellCheck={false}
-              value={apiKey}
-              minLength={20}
-              maxLength={256}
-              required={!status?.configured}
-              onChange={(event) => setApiKey(event.target.value)}
-              aria-describedby="personal-key-help"
-              placeholder={
-                status?.configured
+        <div className="qc-connection-summary">
+          <div>
+            <span>{t('적용 범위', 'Phạm vi')}</span>
+            <strong>{t('내 계정 전용', 'Chỉ tài khoản của tôi')}</strong>
+          </div>
+          <div>
+            <span>{t('저장된 모델', 'Mô hình đã lưu')}</span>
+            <strong>
+              {status?.model ?? t('아직 저장하지 않음', 'Chưa lưu')}
+            </strong>
+          </div>
+          <div>
+            <span>{t('검사 방식', 'Cách kiểm tra')}</span>
+            <strong>
+              {t('인증·모델 접근 확인', 'Xác thực quyền truy cập')}
+            </strong>
+          </div>
+        </div>
+        <div className="qc-connection-layout">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void request('PUT');
+            }}
+          >
+            <fieldset disabled={busy}>
+              <label htmlFor="personal-gemini-key">
+                {t('Gemini API 키', 'Khóa Gemini API')}
+              </label>
+              <input
+                id="personal-gemini-key"
+                type="password"
+                autoComplete="new-password"
+                spellCheck={false}
+                value={apiKey}
+                minLength={20}
+                maxLength={512}
+                required={!status?.configured}
+                onChange={(event) => setApiKey(event.target.value)}
+                aria-describedby="personal-key-help personal-key-error"
+                aria-invalid={Boolean(fields.apiKey)}
+                placeholder={
+                  status?.configured
+                    ? t(
+                        '변경할 때만 새 키 입력',
+                        'Chỉ nhập khóa mới khi thay đổi',
+                      )
+                    : t('API 키를 붙여넣으세요', 'Dán khóa API của bạn')
+                }
+              />
+              <span id="personal-key-error" className="qc-field-error">
+                {fields.apiKey
                   ? t(
-                      '변경할 때만 새 키 입력',
-                      'Chỉ nhập khóa mới khi thay đổi',
+                      fields.apiKey,
+                      'Khóa phải có 20–512 ký tự, không chứa khoảng trắng hoặc xuống dòng. Hỗ trợ AQ.',
                     )
-                  : t('API 키를 붙여넣으세요', 'Dán khóa API của bạn')
-              }
-            />
-            <p id="personal-key-help">
+                  : ''}
+              </span>
+              <p id="personal-key-help">
+                {t(
+                  'AQ. 형식 지원 · 최대 512자. 모델만 바꿀 때는 키를 비워 두세요.',
+                  'Hỗ trợ AQ. · Tối đa 512 ký tự. Để trống khi chỉ đổi mô hình.',
+                )}
+              </p>
+              <label htmlFor="personal-gemini-model">
+                {t('사용할 모델', 'Mô hình sử dụng')}
+              </label>
+              <select
+                id="personal-gemini-model"
+                value={model}
+                aria-invalid={Boolean(fields.model)}
+                aria-describedby="personal-model-error"
+                onChange={(event) => setModel(event.target.value)}
+              >
+                {(
+                  status?.availableModels ?? [
+                    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+                  ]
+                ).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <span id="personal-model-error" className="qc-field-error">
+                {fields.model
+                  ? t(
+                      fields.model,
+                      'Tải lại cài đặt rồi chọn mô hình được hỗ trợ.',
+                    )
+                  : ''}
+              </span>
+              <div className="personal-settings-actions">
+                <button
+                  type="submit"
+                  className="primary-action"
+                  disabled={
+                    !status?.storageReady ||
+                    (!status.configured && !apiKey.trim())
+                  }
+                >
+                  <Link2 aria-hidden="true" />
+                  {busy
+                    ? operation === 'GET'
+                      ? t('설정 불러오는 중…', 'Đang tải cài đặt…')
+                      : t('연결 확인 중…', 'Đang kiểm tra…')
+                    : t('연결 확인 후 저장', 'Kiểm tra kết nối và lưu')}
+                </button>
+                <button type="button" onClick={() => void request()}>
+                  <RefreshCw aria-hidden="true" />
+                  {t('새로 확인', 'Tải lại')}
+                </button>
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('Google에서 API 키 발급', 'Tạo khóa API tại Google')}
+                </a>
+              </div>
+            </fieldset>
+          </form>
+          <aside className="qc-connection-guide">
+            <h3>{t('처음 연결하시나요?', 'Kết nối lần đầu?')}</h3>
+            <ol>
+              <li>
+                {t(
+                  'Google AI Studio에서 API 키를 복사합니다.',
+                  'Sao chép khóa API từ Google AI Studio.',
+                )}
+              </li>
+              <li>
+                {t(
+                  '키 전체를 붙여넣고 사용할 모델을 선택합니다.',
+                  'Dán toàn bộ khóa và chọn mô hình.',
+                )}
+              </li>
+              <li>
+                {t(
+                  '연결 확인 후 저장을 누릅니다. 성공하면 입력한 키가 비워지고 연결 상태가 바뀝니다.',
+                  'Nhấn kiểm tra kết nối và lưu. Khi thành công, ô khóa được xóa và trạng thái thay đổi.',
+                )}
+              </li>
+            </ol>
+            <p>
               {t(
-                '저장된 키는 다시 표시하지 않습니다. 모델만 바꿀 때는 키를 비워 두세요.',
-                'Khóa đã lưu không được hiển thị lại. Để trống khi chỉ đổi mô hình.',
+                '실패하면 입력값과 기존 저장 설정을 유지합니다. 오류 안내를 확인한 뒤 다시 시도하세요.',
+                'Nếu lỗi, giữ nguyên dữ liệu nhập và cài đặt đã lưu. Xem hướng dẫn rồi thử lại.',
               )}
             </p>
-            <label htmlFor="personal-gemini-model">
-              {t('사용할 모델', 'Mô hình sử dụng')}
-            </label>
-            <select
-              id="personal-gemini-model"
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-            >
-              {(
-                status?.availableModels ?? [
-                  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-                ]
-              ).map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <div className="personal-settings-actions">
-              <button
-                type="submit"
-                className="primary-action"
-                disabled={!status?.storageReady}
-              >
-                <Link2 aria-hidden="true" />
-                {busy
-                  ? t('연결 확인 중…', 'Đang kiểm tra…')
-                  : t('연결 확인 후 저장', 'Kiểm tra kết nối và lưu')}
-              </button>
-              <button type="button" onClick={() => void request()}>
-                <RefreshCw aria-hidden="true" />
-                {t('새로 확인', 'Tải lại')}
-              </button>
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t('Google에서 API 키 발급', 'Tạo khóa API tại Google')}
-              </a>
-            </div>
-          </fieldset>
-        </form>
+          </aside>
+        </div>
         {busy && (
           <output>
             {t(
-              '서버 응답을 기다리고 있습니다. 연결 확인은 최대 8초 정도 걸립니다.',
+              operation === 'GET'
+                ? '저장된 설정을 불러오고 있습니다.'
+                : 'Google 인증과 모델 접근을 확인하고 있습니다. 연결 확인은 최대 8초 정도 걸립니다.',
               'Đang chờ máy chủ. Kiểm tra kết nối mất khoảng tối đa 8 giây.',
             )}
           </output>
@@ -235,7 +345,9 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
               error ? 'personal-settings-error' : 'personal-settings-success'
             }
           >
-            {message}
+            {locale === 'vi' && fields.apiKey
+              ? 'Khóa phải có 20–512 ký tự, không chứa khoảng trắng hoặc xuống dòng. Hỗ trợ AQ.'
+              : message}
           </p>
         )}
         {status && !status.storageReady && (
@@ -300,20 +412,22 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           </div>
         )}
       </section>
-      <section className="settings-card">
-        <h2>{t('검수 지침', 'Quy tắc kiểm tra')}</h2>
-        <p>
-          {isAdmin
-            ? t(
-                '상단의 검수 지침 관리 · 관리자 메뉴에서 지침을 작성하고 시험·활성화할 수 있습니다. 프로젝트를 먼저 선택하세요.',
-                'Chọn dự án rồi dùng mục quản lý quy tắc dành cho quản trị viên ở phía trên để soạn, thử và kích hoạt quy tắc.',
-              )
-            : t(
-                '회사 공통 지침은 지정 관리자만 변경합니다. 개인 API 키 설정은 관리자 권한과 별개입니다.',
-                'Chỉ quản trị viên được chỉ định mới thay đổi quy tắc chung. Khóa API cá nhân độc lập với quyền quản trị.',
-              )}
-        </p>
-      </section>
+      {isAdmin && (
+        <section className="settings-card">
+          <h2>{t('검수 지침', 'Quy tắc kiểm tra')}</h2>
+          <p>
+            {isAdmin
+              ? t(
+                  '상단의 검수 지침 관리 · 관리자 메뉴에서 지침을 작성하고 시험·활성화할 수 있습니다. 프로젝트를 먼저 선택하세요.',
+                  'Chọn dự án rồi dùng mục quản lý quy tắc dành cho quản trị viên ở phía trên để soạn, thử và kích hoạt quy tắc.',
+                )
+              : t(
+                  '회사 공통 지침은 지정 관리자만 변경합니다. 개인 API 키 설정은 관리자 권한과 별개입니다.',
+                  'Chỉ quản trị viên được chỉ định mới thay đổi quy tắc chung. Khóa API cá nhân độc lập với quyền quản trị.',
+                )}
+          </p>
+        </section>
+      )}
       <details className="settings-card">
         <summary>
           {t(

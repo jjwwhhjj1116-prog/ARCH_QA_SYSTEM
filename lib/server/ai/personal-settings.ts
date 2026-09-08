@@ -21,8 +21,9 @@ export const personalSettingsInput = z
       .string()
       .trim()
       .min(20)
-      .max(256)
-      .regex(/^[A-Za-z0-9_-]+$/)
+      .max(512)
+      // Google AI Studio auth keys include dots (AQ.); do not assume legacy AIza format.
+      .regex(/^[\x21-\x7e]+$/)
       .optional(),
   })
   .strict();

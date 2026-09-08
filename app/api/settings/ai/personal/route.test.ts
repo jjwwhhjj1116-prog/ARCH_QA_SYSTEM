@@ -41,6 +41,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('personal settings API authorization and boundaries', () => {
+  it('verifies and saves a dotted auth key without returning it', async () => {
+    const authKey = `AQ.${'a'.repeat(300)}._-`;
+    const response = await PUT(
+      req('PUT', { version: 0, model: 'gemini-3.7-flash', apiKey: authKey }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain(authKey);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: { 'x-goog-api-key': authKey } }),
+    );
+  });
+  it('identifies invalid fields without echoing submitted secrets', async () => {
+    const invalid = 'AQ.secret with whitespace';
+    const response = await PUT(
+      req('PUT', { version: 0, model: 'gemini-3.7-flash', apiKey: invalid }),
+    );
+    const body = (await response.json()) as {
+      error: { fields: { apiKey: string } };
+    };
+    expect(response.status).toBe(400);
+    expect(body.error.fields.apiKey).toContain('20~512');
+    expect(JSON.stringify(body)).not.toContain(invalid);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('rejects missing identity and cross-site mutations', async () => {
     expect(
       (await GET(new Request('http://localhost/api/settings/ai/personal')))

@@ -55,6 +55,7 @@ async function handle(request: Request) {
     }
     return Response.json({ data, requestId }, { headers });
   } catch (error) {
+    const fields: Record<string, string> = {};
     let status = 500,
       code = 'INTERNAL_ERROR',
       message = '설정을 처리하지 못했습니다. 잠시 후 새로 확인해 주세요.';
@@ -68,14 +69,29 @@ async function handle(request: Request) {
     else if (error instanceof z.ZodError) {
       status = 400;
       code = 'VALIDATION_FAILED';
-      message = 'API 키와 선택한 모델을 확인해 주세요.';
+      for (const issue of error.issues) {
+        const field = String(issue.path[0] ?? 'request');
+        if (field === 'apiKey')
+          fields.apiKey =
+            '키는 20~512자의 공백 없는 문자열이어야 합니다. AQ. 형식도 지원합니다. 복사한 키의 앞뒤 따옴표와 중간 줄바꿈을 확인해 주세요.';
+        else if (field === 'model')
+          fields.model =
+            '선택한 모델을 지원하지 않습니다. 설정을 새로 불러온 뒤 다시 선택해 주세요.';
+        else if (field === 'version')
+          fields.version =
+            '저장 상태를 불러오지 못했습니다. 새로 확인을 누른 뒤 다시 저장해 주세요.';
+        else
+          fields.request =
+            '요청 형식이 올바르지 않습니다. 설정을 새로 불러와 주세요.';
+      }
+      message = Object.values(fields).join(' ');
     } else if (error instanceof GeminiConfigurationError) {
       status = 400;
       code = error.code;
       message = error.message;
     }
     return Response.json(
-      { error: { code, message, requestId } },
+      { error: { code, message, requestId, fields } },
       { status, headers },
     );
   }

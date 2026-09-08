@@ -93,8 +93,16 @@ describe('personal Gemini settings', () => {
       { version: 0, model: 'unknown' },
       { version: 0, model, owner: 'other' },
       { version: 0, model, apiKey: '' },
-      { version: 0, model, apiKey: 'x'.repeat(257) },
+      { version: 0, model, apiKey: 'x'.repeat(513) },
+      { version: 0, model, apiKey: 'AQ.invalid\r\nheader-content' },
     ])
       expect(personalSettingsInput.safeParse(value).success).toBe(false);
+  });
+  it('accepts dotted auth keys and trims only outside whitespace', () => {
+    const authKey = `AQ.${'a'.repeat(300)}._-`;
+    expect(
+      personalSettingsInput.parse({ version: 0, model, apiKey: ` ${authKey} ` })
+        .apiKey,
+    ).toBe(authKey);
   });
 });

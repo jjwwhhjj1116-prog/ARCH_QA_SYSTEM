@@ -1341,7 +1341,7 @@ function ReviewStudioContent({
           </div>
           <span className="qc-release-marker">
             {' '}
-            <UiText text="FIN 검수 작업실 · v18 · 2026.09.08" />{' '}
+            <UiText text="FIN 검수 작업실 · v19 · 2026.09.08" />{' '}
           </span>
           <LanguageSwitch />
         </header>
@@ -1489,7 +1489,7 @@ function ReviewStudioContent({
                   }}
                 >
                   {' '}
-                  <UiText text="연동 및 상태" />{' '}
+                  <UiText text="개인 설정" />{' '}
                 </button>
                 {selectedProject && currentUser.isAdmin && (
                   <button
