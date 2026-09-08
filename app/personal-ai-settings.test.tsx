@@ -13,7 +13,10 @@ const initial = {
   model: null,
   version: 0,
   checkedAt: null,
-  availableModels: [{ id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' }],
+  availableModels: [
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+  ],
 };
 afterEach(() => {
   cleanup();
@@ -28,7 +31,7 @@ it('saves through the real form, clears input, preserves key on error, and confi
         data: {
           ...initial,
           configured: true,
-          model: 'gemini-3.7-flash',
+          model: 'gemini-3.8-flash',
           version: 1,
         },
       }),
@@ -41,10 +44,14 @@ it('saves through the real form, clears input, preserves key on error, and confi
   render(<PersonalAiSettings isAdmin={false} />);
   const save = await screen.findByRole('button', { name: '연결 확인 후 저장' });
   await waitFor(() => expect(save).toBeEnabled());
+  expect(screen.getByLabelText('사용할 모델')).toHaveValue('gemini-3.8-flash');
   const input = screen.getByLabelText('Gemini API 키');
   fireEvent.change(input, { target: { value: 'synthetic-ui-key-not-real' } });
   fireEvent.click(save);
   await screen.findByText(/연결 확인 및 저장 완료/);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body).model).toBe(
+    'gemini-3.8-flash',
+  );
   expect(input).toHaveValue('');
   fireEvent.change(input, { target: { value: 'replacement-ui-key-not-real' } });
   fireEvent.click(save);
@@ -56,4 +63,24 @@ it('saves through the real form, clears input, preserves key on error, and confi
   await screen.findByText(/개인 API 연결을 해제했습니다/);
   expect(fetcher.mock.calls[3][1].method).toBe('DELETE');
   expect(input).toHaveValue('');
+});
+it('preserves an existing saved model instead of silently upgrading it', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          ...initial,
+          configured: true,
+          model: 'gemini-3.7-flash',
+          version: 1,
+        },
+      }),
+    ),
+  );
+  render(<PersonalAiSettings isAdmin={false} />);
+  await waitFor(() =>
+    expect(screen.getByLabelText('사용할 모델')).toBeEnabled(),
+  );
+  expect(screen.getByLabelText('사용할 모델')).toHaveValue('gemini-3.7-flash');
 });

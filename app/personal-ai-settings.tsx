@@ -9,7 +9,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
   const t = (ko: string, vi: string) => (locale === 'vi' ? vi : ko);
   const [status, setStatus] = useState<PersonalAiStatus | null>(null);
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-3.7-flash');
+  const [model, setModel] = useState('gemini-3.8-flash');
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
@@ -48,7 +48,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
             t('설정을 처리하지 못했습니다.', 'Không thể xử lý cài đặt.'),
         );
       setStatus(body.data);
-      setModel(body.data.model ?? 'gemini-3.7-flash');
+      setModel(body.data.model ?? 'gemini-3.8-flash');
       setConfirm(false);
       if (method !== 'GET') setApiKey('');
       setMessage(
@@ -97,7 +97,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           );
         if (controller.signal.aborted) return;
         setStatus(body.data);
-        setModel(body.data.model ?? 'gemini-3.7-flash');
+        setModel(body.data.model ?? 'gemini-3.8-flash');
       } catch (caught) {
         if (!controller.signal.aborted) {
           setError(true);
@@ -187,7 +187,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
             >
               {(
                 status?.availableModels ?? [
-                  { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+                  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
                 ]
               ).map((item) => (
                 <option key={item.id} value={item.id}>

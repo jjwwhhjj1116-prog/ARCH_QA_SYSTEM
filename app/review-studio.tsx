@@ -1341,7 +1341,7 @@ function ReviewStudioContent({
           </div>
           <span className="qc-release-marker">
             {' '}
-            <UiText text="FIN 검수 작업실 · v17 · 2026.09.08" />{' '}
+            <UiText text="FIN 검수 작업실 · v18 · 2026.09.08" />{' '}
           </span>
           <LanguageSwitch />
         </header>

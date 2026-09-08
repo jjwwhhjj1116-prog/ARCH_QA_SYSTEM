@@ -9,7 +9,7 @@ import {
 
 const secret = '11'.repeat(32);
 const key = 'synthetic-test-key-never-real';
-const model = 'gemini-3.7-flash';
+const model = 'gemini-3.8-flash';
 const verify = () =>
   vi.fn().mockResolvedValue({ provider: 'gemini', status: 'connected', model });
 describe('personal Gemini settings', () => {
