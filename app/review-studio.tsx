@@ -1341,7 +1341,7 @@ function ReviewStudioContent({
           </div>
           <span className="qc-release-marker">
             {' '}
-            <UiText text="FIN 검수 작업실 · v16 · 2026.09.07" />{' '}
+            <UiText text="FIN 검수 작업실 · v17 · 2026.09.08" />{' '}
           </span>
           <LanguageSwitch />
         </header>
@@ -1520,7 +1520,6 @@ function ReviewStudioContent({
                 />
               ) : (
                 <>
-                  <PersonalPreferences />
                   <ModuleWorkspace
                     isAdmin={currentUser.isAdmin}
                     view="settings"
@@ -1528,6 +1527,7 @@ function ReviewStudioContent({
                     reviewCases={reviewCases}
                     onOpenProjects={() => navigate('project-register')}
                   />
+                  <PersonalPreferences />
                 </>
               )}
             </div>

@@ -184,11 +184,17 @@ describe('ModuleWorkspace', () => {
       />,
     );
     expect(
-      screen.getByRole('heading', { name: '연결 및 운영 설정' }),
+      screen.getByRole('heading', { name: '개인 Gemini API 연결' }),
     ).toBeVisible();
     expect(screen.queryByText('N/A · 미구현')).not.toBeInTheDocument();
-    expect(screen.getAllByText('미연결')).toHaveLength(2);
-    expect(screen.getByText('결과 저장 후 사용')).toBeVisible();
-    expect(screen.getByText('기본검사: 외부 AI 미사용 · 0 토큰')).toBeVisible();
+    expect(screen.getByText('미연결')).toBeVisible();
+    expect(screen.getByLabelText('Gemini API 키')).toHaveAttribute(
+      'type',
+      'password',
+    );
+    expect(screen.getByText(/현재 기본검사는 외부 AI 없이/)).toBeVisible();
+    expect(
+      screen.getByText('아직 지원하지 않는 연동 · ERP / 공유 메모리'),
+    ).toBeVisible();
   });
 });

@@ -2536,3 +2536,62 @@ th {
   margin: 8px 0 0;
   line-height: 1.6;
 }
+/* Settings are editable forms; credentials never use browser persistence. */
+.personal-ai-settings h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 24px;
+}
+.personal-ai-settings fieldset {
+  border: 0;
+  padding: 0;
+  margin: 24px 0 12px;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+.personal-ai-settings input,
+.personal-ai-settings select {
+  width: 100%;
+  min-height: 46px;
+  font-size: 16px;
+  padding: 10px;
+  border: 1px solid var(--entry-border);
+  background: var(--entry);
+  border-radius: 6px;
+}
+.personal-ai-settings label {
+  font-weight: 700;
+}
+.personal-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.personal-settings-actions button {
+  min-height: 46px;
+}
+.personal-settings-error {
+  background: #fff0f1;
+  color: #9c1430;
+  padding: 14px;
+  border-radius: 6px;
+}
+.personal-settings-success {
+  background: #e9f8f0;
+  color: #14583c;
+  padding: 14px;
+  border-radius: 6px;
+}
+.personal-settings-disconnect {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.personal-settings-disconnect button {
+  margin: 6px 12px 0 0;
+  min-height: 44px;
+}

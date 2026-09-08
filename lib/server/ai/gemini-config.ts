@@ -86,6 +86,7 @@ export async function testGeminiConnection(
   options: {
     environment?: Environment;
     fetcher?: typeof fetch;
+    verifyResponse?: boolean;
   } = {},
 ): Promise<GeminiConnectionResult> {
   const configuration = requireGeminiConfiguration(
@@ -111,6 +112,39 @@ export async function testGeminiConnection(
 
     if (!response.ok) {
       throw upstreamError(response.status);
+    }
+
+    if (options.verifyResponse) {
+      const reader = response.body?.getReader();
+      if (!reader) throw upstreamError(502);
+      const decoder = new TextDecoder();
+      let raw = '',
+        size = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 32_768) {
+            await reader.cancel();
+            throw upstreamError(502);
+          }
+          raw += decoder.decode(value, { stream: true });
+        }
+        raw += decoder.decode();
+      } finally {
+        reader.releaseLock();
+      }
+      const metadata = JSON.parse(raw) as {
+        name?: unknown;
+        supportedGenerationMethods?: unknown;
+      };
+      if (
+        metadata.name !== `models/${configuration.model}` ||
+        !Array.isArray(metadata.supportedGenerationMethods) ||
+        !metadata.supportedGenerationMethods.includes('generateContent')
+      )
+        throw upstreamError(404);
     }
 
     return {
@@ -160,7 +194,7 @@ function requireGeminiConfiguration(
 }
 
 function upstreamError(status: number): GeminiConnectionError {
-  if (status === 401 || status === 403) {
+  if (status === 400 || status === 401 || status === 403) {
     return new GeminiConnectionError(
       'Gemini 인증 설정을 확인해 주세요.',
       'AI_AUTHENTICATION_FAILED',

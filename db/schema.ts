@@ -18,6 +18,25 @@ export const userProfiles = sqliteTable(
   (table) => [uniqueIndex('user_profile_email_uq').on(table.email)],
 );
 
+export const personalAiSettings = sqliteTable('personal_ai_settings', {
+  subject: text('subject').primaryKey(),
+  encryptedKey: text('encrypted_key'),
+  model: text('model'),
+  version: integer('version').notNull(),
+  checkedAt: text('checked_at'),
+});
+
+export const personalAiSettingsAudit = sqliteTable(
+  'personal_ai_settings_audit',
+  {
+    id: text('id').primaryKey(),
+    subject: text('subject').notNull(),
+    action: text('action').notNull(),
+    version: integer('version').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+);
+
 export const projects = sqliteTable(
   'project',
   {
