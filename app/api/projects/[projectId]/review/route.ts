@@ -14,12 +14,23 @@ import { ReviewService, reviewRequestSchema } from '@/lib/review/server';
 import { WorkbookError } from '@/lib/review/workbook';
 import { ReviewLimitError } from '@/lib/review/engine';
 import { exportReview } from '@/lib/review/report';
+import { forwardReview } from '@/lib/review/compute-client';
+import type { AiRecoveryStore } from '@/lib/review/ai-recovery';
+import { DriveError } from '@/lib/files/google-drive';
+import { SourceInspectionError } from '@/lib/imports/inspect-source-file';
+import {
+  SourcePackageAccessError,
+  SourceUploadStateError,
+} from '@/lib/ingestion/repository';
 
 type Context = { params: Promise<{ projectId: string }> };
-async function respond(
+export async function respond(
   request: Request,
   context: Context,
   write: boolean,
+  insideCompute = false,
+  recovery?: AiRecoveryStore,
+  aiFetcher?: typeof fetch,
 ): Promise<Response> {
   const requestId = requestIdFrom(request.headers);
   const headers = { 'cache-control': 'no-store', 'x-request-id': requestId };
@@ -31,7 +42,19 @@ async function respond(
     });
     const { projectId } = await context.params;
     z.uuid().parse(projectId);
-    const service = new ReviewService();
+    if (
+      !insideCompute &&
+      process.env.FILE_STORAGE_PROVIDER === 'google-drive'
+    ) {
+      const forwarded = await forwardReview(request, projectId);
+      if (forwarded) return forwarded;
+      throw new RequestBoundaryError(
+        503,
+        'REVIEW_COMPUTE_UNAVAILABLE',
+        '검수 실행 서버가 아직 연결되지 않았습니다. 등록한 원본은 보존됩니다.',
+      );
+    }
+    const service = new ReviewService(recovery, aiFetcher);
     let data: unknown;
     if (write)
       data = await service.mutate(
@@ -73,6 +96,25 @@ async function respond(
     }
     return Response.json({ data, requestId }, { headers });
   } catch (error) {
+    if (
+      error instanceof DriveError ||
+      error instanceof SourceInspectionError ||
+      error instanceof SourcePackageAccessError ||
+      error instanceof SourceUploadStateError
+    ) {
+      const status =
+        error instanceof DriveError
+          ? error.status
+          : error instanceof SourcePackageAccessError
+            ? 403
+            : error instanceof SourceUploadStateError
+              ? 409
+              : 422;
+      return Response.json(
+        { error: { code: error.code, message: error.message, requestId } },
+        { status, headers },
+      );
+    }
     if (error instanceof ReviewLimitError)
       return Response.json(
         {

@@ -5,6 +5,32 @@ import { viWorkflow } from './vi-workflow';
 import { useWorkspacePreferences } from './workspace-preferences';
 
 export const vietnamese: Record<string, string> = {
+  '관리자 설정': 'Cài đặt quản trị',
+  '관리자 설정 메뉴': 'Menu quản trị',
+  'API · 회사 Drive': 'API · Drive công ty',
+  '지침을 관리할 프로젝트를 먼저 선택해 주세요.':
+    'Chọn dự án để quản lý quy tắc kiểm tra.',
+  '내 계정과 화면 환경을 관리합니다.':
+    'Quản lý tài khoản và giao diện của bạn.',
+  '내 계정': 'Tài khoản của tôi',
+  '비밀번호 변경은 직원 계정으로 로그인한 경우 사용할 수 있습니다.':
+    'Đăng nhập bằng tài khoản nhân viên để đổi mật khẩu.',
+  '검수 작업 홈': 'Trang chủ kiểm tra',
+  '프로젝트를 선택하고, 자료 등록부터 검수 결과 확인까지 이어서 진행하세요.':
+    'Chọn dự án để đăng ký tài liệu và xem kết quả kiểm tra.',
+  '오른쪽 위 새 프로젝트를 누르면 시작할 수 있습니다.':
+    'Nhấn Dự án mới ở góc trên bên phải để bắt đầu.',
+  '프로젝트 전체 관리': 'Quản lý tất cả dự án',
+  '작업 순서': 'Quy trình làm việc',
+  자료등록: 'Đăng ký tài liệu',
+  '팀을 선택하고 산출서와 집계표를 등록합니다.':
+    'Chọn nhóm và đăng ký bảng tính cùng bảng tổng hợp.',
+  '산출식과 중복 ITEM을 구분해 검토합니다.':
+    'Kiểm tra công thức và ITEM trùng riêng biệt.',
+  '공종별 근거와 검토 결과를 확인합니다.':
+    'Xem căn cứ và kết quả kiểm tra theo công tác.',
+  'API · 저장소 연결 설정': 'Kết nối API và lưu trữ',
+  'FIN 검수 작업실 · v20 · 2026.09.08': 'Phòng kiểm tra FIN · v20 · 2026.09.08',
   '개인 설정': 'Cài đặt cá nhân',
   'FIN 검수 작업실 · v19 · 2026.09.08': 'Phòng kiểm tra FIN · v19 · 2026.09.08',
   ...viWorkflow,

@@ -1,0 +1,39 @@
+{
+  "name": "concost-qc-studio",
+  "account_id": "65161355e2b641a4a878f1826259842c",
+  "main": "worker-entry.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "placement": {
+    "region": "gcp:asia-northeast3"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QUANTITY_INSPECTION",
+        "class_name": "QuantityInspectionObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "quantity-inspection-v1",
+      "new_sqlite_classes": ["QuantityInspectionObject"]
+    }
+  ],
+  "vars": {
+    "EMPLOYEE_LOGIN_ENABLED": "true",
+    "LOCAL_DEMO_MODE": "false",
+    "FILE_STORAGE_PROVIDER": "google-drive",
+    "APP_ORIGIN": "https://concost-qc-studio.jjwwhhjj1116.workers.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "concost-qc-studio-db",
+      "database_id": "c80718b5-558c-4bdd-a4ee-d05c6c5e69b0",
+      "migrations_dir": "drizzle"
+    }
+  ]
+}

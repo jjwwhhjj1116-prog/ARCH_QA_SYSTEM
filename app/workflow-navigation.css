@@ -1,0 +1,205 @@
+.studio-shell .workflow-navigation {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px 20px;
+  color: #17324d;
+}
+.studio-shell .workflow-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  margin: 3px 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #17324d;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 650;
+}
+.workflow-link > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.workflow-link small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #536578;
+  margin-top: 3px;
+}
+.workflow-navigation svg,
+.sidebar-settings svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.studio-shell .workflow-link:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.studio-shell .workflow-link[aria-current='page'] {
+  background: #fff0de;
+  border-color: #de7a22;
+  color: #783b10;
+}
+.workflow-navigation :focus-visible,
+.sidebar-settings:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+.workflow-tree {
+  margin-left: 7px;
+  padding-left: 7px;
+  border-left: 1px solid #d6dee8;
+}
+.workflow-group {
+  margin: 9px 0;
+}
+.workflow-navigation summary {
+  padding: 10px 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+}
+.workflow-navigation summary svg {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 7px;
+}
+.workflow-group > .workflow-link,
+.workflow-group > details {
+  margin-left: 8px;
+  width: calc(100% - 8px);
+}
+.workflow-group details > details {
+  padding-left: 9px;
+}
+.studio-shell .sidebar-foot {
+  flex-shrink: 0;
+}
+.studio-shell .sidebar-settings {
+  margin: 0 0 10px;
+}
+.qc-home {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  color: #17324d;
+}
+.qc-home-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 0 28px;
+  border-bottom: 1px solid #cbd5e1;
+}
+.qc-home h1 {
+  font-size: 30px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.qc-home h2 {
+  font-size: 20px;
+  font-weight: 750;
+  margin-bottom: 20px;
+}
+.qc-home h3 {
+  font-size: 18px;
+  font-weight: 700;
+}
+.qc-home p {
+  color: #4b6075;
+  line-height: 1.7;
+  max-width: 65ch;
+}
+.qc-home-heading .sidebar-project-add {
+  width: auto;
+  flex-shrink: 0;
+  padding: 12px 22px;
+}
+.qc-home-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 36px;
+  padding-top: 28px;
+}
+.qc-home-empty {
+  padding: 40px 24px;
+  margin-bottom: 20px;
+  border: 1px dashed #b3c2d3;
+  background: white;
+}
+.qc-home-projects {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+}
+.qc-home-projects li {
+  border-bottom: 1px solid #d6dee8;
+}
+.qc-home-projects button {
+  width: 100%;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  text-align: left;
+  padding: 20px 12px;
+  background: white;
+}
+.qc-home-projects button:hover {
+  background: #fff0de;
+}
+.qc-home-projects span {
+  flex: 1;
+}
+.qc-home-projects small {
+  display: block;
+  color: #536578;
+  margin-top: 6px;
+}
+.qc-home-guide {
+  padding-left: 26px;
+  border-left: 1px solid #d6dee8;
+}
+.qc-home-guide ol {
+  list-style: decimal;
+  padding-left: 20px;
+}
+.qc-home-guide li {
+  padding: 0 0 24px 4px;
+}
+.qc-home-guide strong {
+  font-size: 16px;
+}
+.qc-home-guide p {
+  margin-top: 8px;
+  font-size: 14px;
+}
+@media (max-width: 1000px) {
+  .qc-home-body {
+    grid-template-columns: 1fr;
+  }
+  .qc-home-guide {
+    padding: 24px 0 0;
+    border-left: 0;
+    border-top: 1px solid #d6dee8;
+  }
+}
+@media (max-width: 600px) {
+  .qc-home-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .qc-home h1 {
+    font-size: 26px;
+  }
+}

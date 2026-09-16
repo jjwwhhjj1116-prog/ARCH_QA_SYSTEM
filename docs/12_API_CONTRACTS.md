@@ -1,5 +1,19 @@
 # API Contracts
 
+## 2026-09-11 local AI persistence recovery candidate
+
+ReviewState adds optional pendingAiSaves [{requestKey,runId,state:'claimed'|'ready'}], scoped to the authenticated actor/case. POST `{action:'resume-ai-save',caseId,requestKey}` persists frozen ready bytes only and returns the existing `{run,decisions}` format. It does not parse inputs or call Gemini. Duplicate completed keys return the prior run; conflicting input or uncertain claimed state never silently re-calls the provider. In google-drive mode company AI fails before provider use when the DO recovery store is absent. Capacity limits and residual uncertainty are documented in WEB_DESKTOP_PLAN section 24. Not yet deployed.
+
+## 2026-09-11 local report persistence candidate
+
+POST review `{action:"save-report",caseId,runId}` authorizes review writes, loads the immutable run and saved decisions, and stores XLSX at `reviews/<runId>/report-<sha256>.xlsx`. Returns `{saved:true,runId,objectKey,sha256,size,format:"xlsx",decisionCount}` only after storage and the permission-guarded completion audit. Identical snapshots reuse a content-addressed key; updated decisions create a new key. GET format=xlsx remains a download without storage mutation. No schema change or production deployment. See WEB_DESKTOP_PLAN section 23.
+
+## 2026-09-10 local registered-source preparation candidate
+
+`POST /api/projects/:projectId/review` accepts `{ action: "prepare-source", caseId, uploadId }`. Server authorization, immutable source lineage/hash, and actual source preflight must pass before atomic stored/finalized promotion and reuse of the existing Drive object. Response `{ sourceVersionId, prepared: true }` is preparation only, not mapping confirmation or AI review completion.
+
+Direct Cloudflare builds forward review requests through the private `QUANTITY_INSPECTION` Durable Object binding, retaining authentication and CSRF checks inside the object. Missing binding returns `503 REVIEW_COMPUTE_UNAVAILABLE`; no heavy-parser fallback. This is a local candidate, not a deployed API change. See ADR-012 and WEB_DESKTOP_PLAN section 22.
+
 ## 2026-09-07 implemented FIN review endpoint
 
 `/api/projects/:projectId/review` now implements the bounded mapping → guideline trial/activation → formal run → decision workflow. Exact request schemas live in `lib/review/server.ts`; per-action semantics, limits, error codes and append-only history are documented in `CONCOST_QC_WORKSTATION_GUIDE.md`. Mapping writes require baseVersionId; immutable D1 guards reject stale or unauthorized writes atomically with audit. XLSX report export uses a fetched frozen run and explicit string cells. This does not yet implement general AI review, asynchronous jobs, final report approval or cross-revision automatic finding matching.

@@ -7,9 +7,11 @@ import { useWorkspacePreferences } from './workspace-preferences';
 export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
   const { locale } = useWorkspacePreferences();
   const t = (ko: string, vi: string) => (locale === 'vi' ? vi : ko);
-  const [status, setStatus] = useState<PersonalAiStatus | null>(null);
+  const [status, setStatus] = useState<
+    (PersonalAiStatus & { canPromotePersonal?: boolean }) | null
+  >(null);
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-3.8-flash');
+  const [model, setModel] = useState('');
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
@@ -19,6 +21,60 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
   const dirty =
     Boolean(apiKey) || Boolean(status?.configured && model !== status.model);
 
+  async function probeGeneration() {
+    if (busy || dirty || !status?.configured) return;
+    setBusy(true);
+    setOperation('PROBE');
+    setError(false);
+    setMessage('');
+    try {
+      const response = await fetch('/api/settings/ai/company', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'probe-generation',
+          version: status.version,
+        }),
+      });
+      const body = (await response.json()) as {
+        error?: { message: string };
+        data: {
+          completed: boolean;
+          httpStatus: number | null;
+          code: string;
+          diagnostic?: string;
+          origin?: string;
+        };
+      };
+      if (!response.ok || body.error)
+        throw new Error(
+          body.error?.message ?? '생성 시험 응답을 확인하지 못했습니다.',
+        );
+      const result = body.data;
+      setError(!result.completed);
+      setMessage(
+        result.completed
+          ? t(
+              '짧은 문장 생성 성공. 저장된 키와 모델로 실제 응답을 받았습니다. 산출서 검수 완료는 아닙니다.',
+              'Tạo văn bản thành công. Đây không phải kết quả kiểm tra bảng tính.',
+            )
+          : t(
+              `짧은 문장 생성 실패. HTTP ${result.httpStatus ?? '없음'} · ${result.code}${result.diagnostic ? ` · ${result.diagnostic}` : ''} · ${result.origin ?? ''}. 키와 산출서는 변경하지 않았습니다.`,
+              `Tạo văn bản thất bại. HTTP ${result.httpStatus ?? 'N/A'} · ${result.code}. Không thay đổi khóa hoặc dữ liệu.`,
+            ),
+      );
+    } catch (caught) {
+      setError(true);
+      setMessage(
+        caught instanceof Error
+          ? caught.message
+          : '생성 시험 연결이 끊겼습니다.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function request(method = 'GET') {
     setOperation(method);
     setBusy(true);
@@ -26,7 +82,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
     setError(false);
     setMessage('');
     try {
-      const response = await fetch('/api/settings/ai/personal', {
+      const response = await fetch('/api/settings/ai/company', {
         method,
         cache: 'no-store',
         ...(method === 'GET'
@@ -34,28 +90,65 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           : {
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify(
-                method === 'DELETE'
-                  ? { version: status?.version, confirm: true }
-                  : {
-                      version: status?.version,
-                      model,
-                      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-                    },
+                method === 'PATCH'
+                  ? {
+                      action: 'promote-personal',
+                      version: status?.version ?? 0,
+                    }
+                  : method === 'DELETE'
+                    ? { version: status?.version, confirm: true }
+                    : {
+                        version: status?.version,
+                        ...(method === 'PUT' ? { model } : {}),
+                        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+                      },
               ),
             }),
       });
-      const body = (await response.json()) as {
+      const body = (await response.json().catch(() => {
+        throw new Error(
+          t(
+            `설정 서버가 올바른 응답을 보내지 않았습니다 (HTTP ${response.status}). 로그인 상태를 확인하고 다시 시도해 주세요.`,
+            `Máy chủ trả lời không hợp lệ (HTTP ${response.status}). Kiểm tra đăng nhập rồi thử lại.`,
+          ),
+        );
+      })) as {
         data: PersonalAiStatus;
-        error?: { message: string; fields?: Record<string, string> };
+        error?: {
+          message: string;
+          code?: string;
+          diagnostic?: string;
+          fields?: Record<string, string>;
+        };
       };
       if (body.error?.fields) setFields(body.error.fields);
       if (!response.ok || body.error)
         throw new Error(
-          body.error?.message ??
-            t('설정을 처리하지 못했습니다.', 'Không thể xử lý cài đặt.'),
+          body.error
+            ? `${body.error.message}${body.error.code ? ` [${body.error.code}]` : ''}${body.error.diagnostic ? ` (${body.error.diagnostic})` : ''}`
+            : t('설정을 처리하지 못했습니다.', 'Không thể xử lý cài đặt.'),
         );
+      if (method === 'POST') {
+        setStatus((previous) =>
+          previous
+            ? { ...previous, availableModels: body.data.availableModels }
+            : previous,
+        );
+        setModel((previous) =>
+          body.data.availableModels.some((item) => item.id === previous)
+            ? previous
+            : (body.data.availableModels[0]?.id ?? ''),
+        );
+        setMessage(
+          t(
+            'Google에서 사용 가능한 모델을 조회했습니다. 모델을 선택한 뒤 저장하세요. 키는 아직 저장하지 않았습니다.',
+            'Đã tải mô hình từ Google. Chọn mô hình rồi lưu. Khóa chưa được lưu.',
+          ),
+        );
+        return;
+      }
       setStatus(body.data);
-      setModel(body.data.model ?? 'gemini-3.8-flash');
+      setModel(body.data.model ?? body.data.availableModels[0]?.id ?? '');
       setConfirm(false);
       if (method !== 'GET') setApiKey('');
       setMessage(
@@ -66,8 +159,8 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
             )
           : method === 'DELETE'
             ? t(
-                '개인 API 연결을 해제했습니다. 원본과 검수 결과는 유지됩니다.',
-                'Đã ngắt API cá nhân. Dữ liệu gốc và kết quả được giữ nguyên.',
+                '회사 공용 API 연결을 해제했습니다. 직원 AI 검수도 중단되며 기존 결과는 유지됩니다.',
+                'Đã ngắt API công ty. Kiểm tra AI của nhân viên dừng; kết quả cũ được giữ.',
               )
             : '',
       );
@@ -89,7 +182,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch('/api/settings/ai/personal', {
+        const response = await fetch('/api/settings/ai/company', {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -104,7 +197,7 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           );
         if (controller.signal.aborted) return;
         setStatus(body.data);
-        setModel(body.data.model ?? 'gemini-3.8-flash');
+        setModel(body.data.model ?? body.data.availableModels[0]?.id ?? '');
       } catch (caught) {
         if (!controller.signal.aborted) {
           setError(true);
@@ -125,11 +218,11 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
     <div className="settings-workspace">
       <header className="qc-settings-heading">
         <div>
-          <h1>{t('설정', 'Cài đặt')}</h1>
+          <h1>{t('관리자 설정', 'Cài đặt quản trị')}</h1>
           <p>
             {t(
-              '내 API 연결과 작업 환경을 관리합니다.',
-              'Quản lý API cá nhân và môi trường làm việc.',
+              'API 연결과 회사 저장소를 관리합니다. 지침은 검수 지침 관리에서 설정하세요.',
+              'Quản lý API và kho công ty. Cấu hình quy tắc trong mục quản lý quy tắc.',
             )}
           </p>
         </div>
@@ -153,12 +246,12 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           <div>
             <h2 id="personal-ai-title">
               <KeyRound aria-hidden="true" />{' '}
-              {t('개인 Gemini API 연결', 'Kết nối Gemini API cá nhân')}
+              {t('회사 공용 Gemini API', 'Gemini API dùng chung công ty')}
             </h2>
             <p>
               {t(
-                '본인 계정에 사용할 API 키를 입력하고 연결하세요.',
-                'Nhập khóa API để sử dụng cho tài khoản của bạn.',
+                '직원들의 AI 검수에 사용할 회사 공용 키입니다. 사용량은 이 키에 과금됩니다.',
+                'Khóa dùng chung cho kiểm tra AI của nhân viên. Chi phí được tính vào khóa này.',
               )}
             </p>
           </div>
@@ -168,18 +261,26 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
             {busy
               ? t('확인 중', 'Đang kiểm tra')
               : error
-                ? t('확인 필요 · 저장 실패', 'Cần kiểm tra · Chưa lưu')
+                ? t('요청 실패 · 확인 필요', 'Yêu cầu thất bại · Cần kiểm tra')
                 : dirty
                   ? t('변경사항 미저장', 'Thay đổi chưa lưu')
                   : status?.configured
-                    ? t('연결 확인됨', 'Đã xác thực')
+                    ? t(
+                        '키 저장됨 · 생성은 별도 확인',
+                        'Đã lưu khóa · Cần kiểm tra tạo văn bản',
+                      )
                     : t('연결 전', 'Chưa kết nối')}
           </span>
         </div>
         <div className="qc-connection-summary">
           <div>
             <span>{t('적용 범위', 'Phạm vi')}</span>
-            <strong>{t('내 계정 전용', 'Chỉ tài khoản của tôi')}</strong>
+            <strong>
+              {t(
+                '회사 공용 · 직원 검수',
+                'Dùng chung · Kiểm tra của nhân viên',
+              )}
+            </strong>
           </div>
           <div>
             <span>{t('저장된 모델', 'Mô hình đã lưu')}</span>
@@ -195,6 +296,26 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </div>
         <div className="qc-connection-layout">
+          {status?.canPromotePersonal && (
+            <div className="qc-notice">
+              <p>
+                {t(
+                  '검증된 기존 개인 연결을 회사 공용으로 전환할 수 있습니다. 직원 사용량도 이 키에 과금됩니다.',
+                  'Có thể chuyển kết nối cá nhân đã xác minh sang dùng chung. Chi phí nhân viên tính vào khóa này.',
+                )}
+              </p>
+              <button
+                className="primary-action"
+                disabled={busy}
+                onClick={() => void request('PATCH')}
+              >
+                {t(
+                  '기존 연결을 회사 공용으로 전환',
+                  'Chuyển kết nối sang dùng chung',
+                )}
+              </button>
+            </div>
+          )}
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -246,15 +367,20 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
               <select
                 id="personal-gemini-model"
                 value={model}
+                required
                 aria-invalid={Boolean(fields.model)}
                 aria-describedby="personal-model-error"
                 onChange={(event) => setModel(event.target.value)}
               >
-                {(
-                  status?.availableModels ?? [
-                    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-                  ]
-                ).map((item) => (
+                {!model && (
+                  <option value="">
+                    {t(
+                      '먼저 사용 가능한 모델을 조회하세요',
+                      'Tải danh sách mô hình trước',
+                    )}
+                  </option>
+                )}
+                {(status?.availableModels ?? []).map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.label}
                   </option>
@@ -270,10 +396,19 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
               </span>
               <div className="personal-settings-actions">
                 <button
+                  type="button"
+                  disabled={!status || (!apiKey.trim() && !status.configured)}
+                  onClick={() => void request('POST')}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  {t('사용 가능한 모델 조회', 'Tải mô hình khả dụng')}
+                </button>
+                <button
                   type="submit"
                   className="primary-action"
                   disabled={
                     !status?.storageReady ||
+                    !model ||
                     (!status.configured && !apiKey.trim())
                   }
                 >
@@ -309,8 +444,8 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
               </li>
               <li>
                 {t(
-                  '키 전체를 붙여넣고 사용할 모델을 선택합니다.',
-                  'Dán toàn bộ khóa và chọn mô hình.',
+                  '키 전체를 붙여넣고 사용 가능한 모델 조회를 눌러 Google이 반환한 모델을 선택합니다.',
+                  'Dán khóa, tải mô hình khả dụng và chọn mô hình Google trả về.',
                 )}
               </li>
               <li>
@@ -331,12 +466,31 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
         {busy && (
           <output>
             {t(
-              operation === 'GET'
-                ? '저장된 설정을 불러오고 있습니다.'
-                : 'Google 인증과 모델 접근을 확인하고 있습니다. 연결 확인은 최대 8초 정도 걸립니다.',
+              operation === 'PROBE'
+                ? '짧은 문장으로 실제 생성을 시험하고 있습니다. 자동 재시도하지 않습니다.'
+                : operation === 'GET'
+                  ? '저장된 설정을 불러오고 있습니다.'
+                  : 'Google 인증과 모델 접근을 확인하고 있습니다. 연결 확인은 최대 8초 정도 걸립니다.',
               'Đang chờ máy chủ. Kiểm tra kết nối mất khoảng tối đa 8 giây.',
             )}
           </output>
+        )}
+        {status?.configured && (
+          <div className="personal-settings-actions">
+            <button
+              type="button"
+              disabled={busy || dirty}
+              onClick={() => void probeGeneration()}
+            >
+              {t('짧은 문장 생성 시험', 'Thử tạo văn bản ngắn')}
+            </button>
+            <p>
+              {t(
+                '저장된 키·모델로 고정 문장 1회 전송 · 출력 상한 64토큰 · API 사용료 발생 가능 · 산출서 미전송',
+                'Gửi một câu cố định bằng khóa đã lưu · Tối đa 64 token đầu ra · Có thể tính phí · Không gửi bảng tính',
+              )}
+            </p>
+          </div>
         )}
         {message && (
           <p
@@ -360,7 +514,8 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
         )}
         {status?.checkedAt && (
           <p>
-            {t('마지막 연결 확인', 'Lần kiểm tra gần nhất')}:{' '}
+            {t('마지막 모델 접근 확인', 'Lần kiểm tra quyền truy cập gần nhất')}
+            :{' '}
             {new Date(status.checkedAt).toLocaleString(
               locale === 'vi' ? 'vi-VN' : 'ko-KR',
             )}
@@ -387,14 +542,14 @@ export function PersonalAiSettings({ isAdmin }: { isAdmin: boolean }) {
                 className="danger-action"
                 onClick={() => setConfirm(true)}
               >
-                {t('개인 API 연결 해제', 'Ngắt kết nối API cá nhân')}
+                {t('회사 공용 API 연결 해제', 'Ngắt kết nối API công ty')}
               </button>
             ) : (
               <>
                 <p>
                   {t(
-                    '저장된 개인 키를 삭제합니다. 다시 연결하려면 키를 입력해야 합니다. 산출서와 검수 이력은 삭제하지 않습니다.',
-                    'Xóa khóa cá nhân đã lưu. Cần nhập lại để kết nối. Không xóa bảng tính hoặc lịch sử kiểm tra.',
+                    '회사 공용 키를 삭제하면 직원의 AI 검수도 중단됩니다. 산출서와 검수 이력은 삭제하지 않습니다.',
+                    'Xóa khóa công ty sẽ dừng kiểm tra AI của nhân viên. Không xóa dữ liệu hoặc lịch sử.',
                   )}
                 </p>
                 <button

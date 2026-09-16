@@ -733,13 +733,18 @@ function bytesEqual(
   return left.every((value, index) => value === right[index]);
 }
 
+const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return crc >>> 0;
+});
+
 function crc32(bytes: Uint8Array<ArrayBufferLike>): number {
   let crc = 0xffffffff;
   for (const value of bytes) {
-    crc ^= value;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
+    crc = (crc >>> 8) ^ crcTable[(crc ^ value) & 0xff];
   }
   return (crc ^ 0xffffffff) >>> 0;
 }

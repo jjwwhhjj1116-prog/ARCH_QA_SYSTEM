@@ -1,0 +1,10 @@
+{
+  "name": "concost-qc-gemini-outbound",
+  "account_id": "65161355e2b641a4a878f1826259842c",
+  "main": "workers/gemini-outbound.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "placement": { "region": "aws:ap-northeast-2" },
+  "observability": { "enabled": false }
+}

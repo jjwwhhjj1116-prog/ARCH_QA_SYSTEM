@@ -19,19 +19,24 @@ const child = spawn(
     '--inspector-port',
     '9246',
     '--var',
-    'EMPLOYEE_LOGIN_ENABLED:true',
+    process.env.QC_DIRECT_TEST === 'true'
+      ? 'EMPLOYEE_LOGIN_ENABLED:false'
+      : 'EMPLOYEE_LOGIN_ENABLED:true',
     '--var',
     'APP_ORIGIN:http://localhost:4184',
     '--persist-to',
     '.wrangler/state',
     '--log-level',
-    'warn',
+    'info',
   ],
   {
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      ...Object.fromEntries(
+        Array.from({ length: 8 }, (_, i) => [`EMPLOYEE_ROSTER_${i + 1}`, '']),
+      ),
       WRANGLER_WRITE_LOGS: 'false',
       WRANGLER_LOG_PATH: '.wrangler/logs',
       WRANGLER_REGISTRY_PATH: '.wrangler/auth-http-registry',
@@ -62,6 +67,7 @@ try {
   if (!ready) throw new Error('Local production Worker did not start');
   await runHttpTest();
 } catch (error) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   console.error('Local Worker diagnostics (no real accounts):', diagnostics);
   throw error;
 } finally {

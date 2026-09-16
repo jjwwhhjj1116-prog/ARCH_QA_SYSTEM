@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { getD1Binding } from '@/db';
+import { isApplicationAdmin } from '@/lib/auth/administrators';
+import { regionalGeminiFetch } from '@/lib/server/ai/regional-fetch';
 import {
   authenticateRequest,
   AuthenticationError,
@@ -18,6 +20,7 @@ import {
 import {
   personalSettings,
   personalSettingsInput,
+  personalModelsInput,
   PersonalSettingsError,
 } from '@/lib/server/ai/personal-settings';
 
@@ -31,10 +34,18 @@ async function handle(request: Request) {
     const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
+    if (!isApplicationAdmin(actor.email))
+      throw new AuthenticationError(
+        '관리자만 API 설정에 접근할 수 있습니다.',
+        'ADMIN_REQUIRED',
+        403,
+      );
     const service = personalSettings(
       getD1Binding(),
       actor.id,
       process.env.AI_SETTINGS_ENCRYPTION_KEY,
+      undefined,
+      regionalGeminiFetch,
     );
     let data;
     if (request.method === 'GET') data = await service.status();
@@ -42,6 +53,8 @@ async function handle(request: Request) {
       const body = await readJson(request);
       if (request.method === 'PUT')
         data = await service.save(personalSettingsInput.parse(body));
+      else if (request.method === 'POST')
+        data = await service.models(personalModelsInput.parse(body));
       else
         data = await service.disconnect(
           z
@@ -91,11 +104,22 @@ async function handle(request: Request) {
       message = error.message;
     }
     return Response.json(
-      { error: { code, message, requestId, fields } },
+      {
+        error: {
+          code,
+          message,
+          requestId,
+          fields,
+          ...(error instanceof GeminiConnectionError && error.diagnostic
+            ? { diagnostic: error.diagnostic }
+            : {}),
+        },
+      },
       { status, headers },
     );
   }
 }
 export const GET = handle;
 export const PUT = handle;
+export const POST = handle;
 export const DELETE = handle;

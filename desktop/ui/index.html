@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>CONCOST QC 스튜디오</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- THESIS: 원가관리 참조의 상단 도구와 프로젝트 맥락 아래 원본/근거 분할 작업실. OWN-WORLD: 밝은 업무용 중립 배경, 파랑 실행, 오렌지 선택, 노랑 입력. STORY: 회원 확인 후 프로젝트와 원본을 골라 로컬 기본검수와 보고서. FIRST VIEWPORT: 86px 도구 모음, 74px 프로젝트 바, 조절 가능한 목록/근거. FORM: 사용자 지정 원가관리 스크린샷 기준. FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->
+    <header>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <!-- Existing company artwork; show the symbol beside the product name. -->
+          <img
+            src="concost-logo-horizontal.png"
+            width="482"
+            height="112"
+            alt=""
+          />
+        </span>
+        <div>
+          <strong>CONCOST QC STUDIO</strong
+          ><small>산출서 · 일반 검수 · 분석표</small>
+        </div>
+      </div>
+      <nav aria-label="작업 도구">
+        <button id="projectTab" class="selected">프로젝트·자료등록</button
+        ><button id="reviewTab">일반 검수 결과</button
+        ><button id="exportTop" disabled>분석표 출력</button
+        ><button disabled title="건설사 기준서 기능은 후속 확장입니다">
+          건설사 기준서 · 예정
+        </button>
+      </nav>
+      <div id="profile" hidden aria-label="로그인 계정">
+        <strong id="member">로그인 필요</strong>
+        <small id="memberEmail"></small><small id="memberRole"></small>
+      </div>
+      <button id="login" class="primary">로그인</button
+      ><button id="logout" class="authLogout" disabled>로그아웃</button>
+    </header>
+    <section class="context">
+      <label
+        >현재 프로젝트<select id="projects" disabled>
+          <option value="">회원 로그인 후 선택</option>
+        </select></label
+      >
+      <div><small>적용 기준</small><strong>제품 일반 기본검사</strong></div>
+      <div><small>처리 위치</small><strong>이 PC · 기본검사</strong></div>
+      <button id="run" class="primary" disabled>일반 검수 실행</button>
+    </section>
+    <main>
+      <div class="heading">
+        <div>
+          <h1 id="title">산출서와 집계표</h1>
+          <p id="description">
+            기존 회원 계정으로 로그인하고 프로젝트를 선택하세요. 원본 파일은
+            변경하지 않습니다.
+          </p>
+        </div>
+        <span class="preview">설치형 시험판 0.1.4</span>
+      </div>
+      <div class="toolbar">
+        <button id="newProject" class="newProject" disabled>새 프로젝트</button>
+        <button id="choose" class="primary" disabled>산출서 가져오기</button
+        ><button
+          id="cloudChoose"
+          disabled
+          aria-expanded="false"
+          aria-controls="cloudPanel"
+        >
+          등록 원본 가져오기</button
+        ><button id="remove" class="danger" disabled>
+          선택 파일 목록에서 제외</button
+        ><button id="cancel" disabled>작업 중단</button
+        ><span>파일당 20MiB · 최대 16개 · 합계 80MiB</span>
+      </div>
+      <p id="status" role="status">
+        로그인하면 회원과 프로젝트가 자동으로 연결됩니다.
+      </p>
+      <button id="refresh" class="primary" hidden>로그인 연결 다시 확인</button>
+      <section id="projectPanel" hidden aria-label="프로젝트 등록">
+        <h2>새 프로젝트 등록</h2>
+        <p>
+          프로젝트명만 입력하면 코드가 자동 생성됩니다. 서버에 저장한 뒤 바로
+          선택합니다.
+        </p>
+        <label
+          >프로젝트명 (필수)<input id="projectName" maxlength="120"
+        /></label>
+        <label>발주처 (선택)<input id="projectClient" maxlength="120" /></label>
+        <button id="projectSave" class="primary">프로젝트 저장·선택</button>
+        <button id="projectClose">닫기</button>
+        <p id="projectStatus" role="status"></p>
+      </section>
+      <section id="cloudPanel" hidden aria-label="등록 원본 선택">
+        <h2>등록 원본 가져오기</h2>
+        <p>
+          등록된 원본을 이 PC로 가져옵니다. 서버 검수 대기 자료이며, 실행 결과는
+          PC 기본검사만 해당합니다. AI 검수·서버 승인이 아닙니다.
+        </p>
+        <div class="cloudControls">
+          <label
+            >자료 기록<select id="cloudCase">
+              <option value="">자료 기록 선택</option>
+            </select></label
+          >
+          <label
+            >등록 파일<select id="cloudFile">
+              <option value="">파일 선택</option>
+            </select></label
+          >
+          <button id="cloudImport" class="primary" disabled>
+            선택 원본 가져오기
+          </button>
+          <button id="cloudClose">닫기</button>
+        </div>
+        <p id="cloudStatus" role="status">자료 기록을 불러옵니다.</p>
+      </section>
+      <div class="workspace">
+        <section class="tablePanel" aria-label="작업 목록">
+          <table>
+            <thead>
+              <tr id="columns">
+                <th>선택</th>
+                <th>원본 파일</th>
+                <th>크기</th>
+                <th>상태</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty">
+            <h2>검수할 산출서를 선택하세요</h2>
+            <p>
+              XLSX·CSV의 기존 안전 검사와 일반 검수 엔진을 PC에서 실행합니다.
+            </p>
+            <p>
+              도면 의미 분석·건설사 기준서·Gemini 검수·서버 동기화는 이 시험판에
+              포함되지 않습니다.
+            </p>
+          </div>
+        </section>
+        <aside>
+          <h2>작업 정보·검수 근거</h2>
+          <div id="detail">
+            <h3>진행 순서</h3>
+            <ol>
+              <li>지정 회원 계정으로 로그인</li>
+              <li>프로젝트 선택</li>
+              <li>산출서·집계표 가져오기</li>
+              <li>일반 검수 실행</li>
+              <li>결과 확인 후 분석표 출력</li>
+            </ol>
+            <p>
+              자동 인식하지 못한 열·단위·범위는 정상으로 처리하지 않고 미평가로
+              남깁니다.
+            </p>
+          </div>
+          <h3>검증 범위와 제한</h3>
+          <ul id="limitations">
+            <li>로컬 시험 결과이며 서버 승인·AI 검수 결과가 아닙니다.</li>
+            <li>
+              일반 기준은 제품 기본검사이며 특정 건설사의 산출기준을 의미하지
+              않습니다.
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </main>
+    <footer>
+      <span id="footer">회원 인증 전 · 원본 미선택</span
+      ><span>서버 동기화 미지원 · 자동 업데이트 준비 전</span>
+    </footer>
+    <script src="app.js"></script>
+    <script src="instructions.js"></script>
+  </body>
+</html>

@@ -36,7 +36,9 @@ import {
   type BasicJobStatus,
 } from '@/lib/review/contracts';
 import { columnName } from '@/lib/review/columns';
+import { reviewCompleteness } from '@/lib/review/completeness';
 import { can } from '@/lib/domain/permissions';
+import { AiInstructionEditor } from './ai-instruction-editor';
 
 const dispositionLabels = {
   needs_fix: '수정 필요',
@@ -175,6 +177,8 @@ function WorkbenchCase({
   const [mapping, setMapping] = useState<Mapping | null>(null);
   const [profile, setProfile] = useState<Profile>({ ...defaultProfile });
   const [profileId, setProfileId] = useState('');
+  const [aiProfileId, setAiProfileId] = useState<string | null>(null);
+  const includeAi = aiProfileId === profileId;
   const [run, setRun] = useState<Run | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -497,7 +501,25 @@ function WorkbenchCase({
       }
     });
   }
-  function execute(trial: boolean) {
+  const [aiConfirmation, setAiConfirmation] = useState<{
+    trial: boolean;
+    profileId: string;
+    parentRunId?: string;
+  } | null>(null);
+  const stopAiBatches = useRef(false);
+  useEffect(
+    () => () => {
+      stopAiBatches.current = true;
+    },
+    [],
+  );
+  function execute(
+    trial: boolean,
+    useAi = includeAi,
+    confirmed = false,
+    parentRunId?: string,
+  ) {
+    if (busy) return;
     if (
       reason.trim() &&
       !window.confirm(
@@ -511,37 +533,69 @@ function WorkbenchCase({
       );
       return;
     }
+    if (useAi && !confirmed) {
+      setAiConfirmation({ trial, profileId, parentRunId });
+      return;
+    }
     void perform(
-      trial ? '지침 시험 검수 중' : '저장된 원본 검수 중',
+      useAi
+        ? '지침 기반 AI 검수 중 · 응답을 기다려 주세요'
+        : trial
+          ? '지침 시험 검수 중'
+          : '저장된 원본 검수 중',
       async () => {
-        const data = await request<{ run: Run; decisions: Decision[] }>({
-          action: 'run',
-          profileId,
-          trial,
-        });
-        setRun(data.run);
-        setDecisions(data.decisions);
-        setSelectedId(data.run.findings[0]?.id ?? '');
-        setTab('results');
-        await reload();
-        setNotice(
-          uiText(
-            '{kind} 실행을 저장했습니다. {rows}행 · 검토 항목 {findings}건. 미평가 범위를 함께 확인하세요.',
-            {
-              kind: uiText(trial ? '시험' : '정식'),
-              rows: data.run.rows.length.toLocaleString(),
-              findings: data.run.findings.length,
-            },
-          ),
-        );
+        stopAiBatches.current = false;
+        let previousId = parentRunId;
+        for (let batch = 0; batch < 10; batch++) {
+          if (stopAiBatches.current) break;
+          const data = await request<{ run: Run; decisions: Decision[] }>({
+            action: 'run',
+            profileId,
+            trial,
+            ...(previousId ? { parentRunId: previousId } : {}),
+            ...(useAi
+              ? { includeAi: true, requestKey: crypto.randomUUID() }
+              : {}),
+          }).catch(async (error: unknown) => {
+            // Refresh durable pending results before offering another paid execution.
+            await reload().catch(() => undefined);
+            throw error;
+          });
+          setRun(data.run);
+          setDecisions(data.decisions);
+          setSelectedId(data.run.findings[0]?.id ?? '');
+          setTab('results');
+          await reload();
+          setNotice(
+            uiText(
+              '{kind} 실행을 저장했습니다. {rows}행 · 검토 항목 {findings}건. 미평가 범위를 함께 확인하세요.',
+              {
+                kind: uiText(trial ? '시험' : '정식'),
+                rows: data.run.rows.length.toLocaleString(),
+                findings: data.run.findings.length,
+              },
+            ),
+          );
+          if (
+            !useAi ||
+            !data.run.aiChecks?.some((c) => c.status === 'pending') ||
+            data.run.aiChecks.some((c) => c.status === 'failed') ||
+            stopAiBatches.current ||
+            batch === 9
+          )
+            break;
+          previousId = data.run.id;
+          setBusy(`묶음 ${batch + 1} 저장 완료 · 다음 미전송 묶음 대기 중`);
+          await new Promise((resolve) => setTimeout(resolve, 15_000));
+        }
       },
     );
   }
   const selectedProfile = state?.profiles.find((p) => p.id === profileId);
   const profileDirty =
     adminSettings &&
-    !!selectedProfile &&
-    JSON.stringify(profile) !== JSON.stringify(selectedProfile.profile);
+    JSON.stringify(profile) !==
+      JSON.stringify(selectedProfile?.profile ?? defaultProfile);
   const savedMapping = state?.mappings.find(
     (m) =>
       m.sourceVersionId === mapping?.sourceVersionId &&
@@ -568,6 +622,10 @@ function WorkbenchCase({
     };
   }, [onNavigationGuard, busy, reason, mappingDirty, profileDirty, uiText]);
   const currentSheet = inspection?.sheets.find((s) => s.name === sheetName);
+  const completeness = useMemo(
+    () => (run ? reviewCompleteness(run) : null),
+    [run],
+  );
   const rowsById = useMemo(
     () => new Map(run?.rows.map((r) => [r.id, r]) ?? []),
     [run],
@@ -576,6 +634,7 @@ function WorkbenchCase({
     run?.findings.filter(
       (f) =>
         (adminSettings ||
+          f.ruleId.startsWith('AI-') ||
           (mode === 'duplicate-ai'
             ? f.ruleId === 'ITEM-018'
             : f.ruleId !== 'ITEM-018')) &&
@@ -646,13 +705,27 @@ function WorkbenchCase({
             <>
               <button
                 className="qc-primary qc-start-review"
+                disabled={
+                  !editable ||
+                  !!busy ||
+                  selectedProfile?.status !== 'active' ||
+                  !selectedProfile.profile.instructions?.some(
+                    (i) => i.enabled,
+                  ) ||
+                  !state?.mappings.some((m) => m.confirmed)
+                }
+                onClick={() => execute(false, true)}
+              >
+                <Play /> <UiText text="Gemini AI 검수 시작" />
+              </button>
+              <button
                 disabled={!editable || !!busy || !state?.sources.length}
                 onClick={startBasicReview}
               >
                 <Play />
                 {state?.pendingJob
-                  ? uiText('중단된 검수 이어서 진행')
-                  : uiText('전체 자료 확인 후 검수 시작')}
+                  ? uiText('중단된 기본검사 이어서 진행')
+                  : uiText('기본검사 · AI 미사용')}
               </button>
               <button
                 disabled={!editable || !!busy || !state?.sources.length}
@@ -669,9 +742,9 @@ function WorkbenchCase({
                     selectedProfile?.status !== 'active' ||
                     !state?.mappings.some((m) => m.confirmed)
                   }
-                  onClick={() => execute(false)}
+                  onClick={() => execute(false, false)}
                 >
-                  <Play /> <UiText text="승인 지침으로 추가 검수" />{' '}
+                  <Play /> <UiText text="승인 지침 검사 · AI 미사용" />{' '}
                 </button>
               )}
             </>
@@ -706,6 +779,121 @@ function WorkbenchCase({
           )}
         </div>
       </header>
+      {!!state?.pendingAiSaves?.length && (
+        <section className="qc-notice" aria-label="AI 결과 저장 복구">
+          <h3>
+            <UiText text="AI 결과 저장 확인" />
+          </h3>
+          {state.pendingAiSaves.map((pending) => (
+            <div key={pending.requestKey}>
+              <p>
+                {pending.state === 'ready'
+                  ? uiText(
+                      'AI 응답은 보관되어 있습니다. AI를 다시 호출하지 않고 저장만 재시도할 수 있습니다.',
+                    )
+                  : uiText(
+                      '이전 AI 요청의 응답 보관 여부를 확인할 수 없습니다. 중복 과금을 막기 위해 자동 재호출하지 않습니다.',
+                    )}
+              </p>
+              <small>
+                {uiText('실행 ID')}: {pending.runId}
+              </small>
+              {pending.state === 'ready' && (
+                <button
+                  disabled={!!busy || !editable}
+                  onClick={() => {
+                    void perform('AI 결과 저장 재시도 중', async () => {
+                      const result = await request<{
+                        run: Run;
+                        decisions: Decision[];
+                      }>({
+                        action: 'resume-ai-save',
+                        requestKey: pending.requestKey,
+                      });
+                      setRun(result.run);
+                      setDecisions(result.decisions);
+                      setSelectedId(result.run.findings[0]?.id ?? '');
+                      setTab('results');
+                      await reload();
+                      setNotice(
+                        'AI 결과 저장 완료. 추가 AI 호출은 하지 않았습니다.',
+                      );
+                    });
+                  }}
+                >
+                  <Save /> <UiText text="AI 결과 저장 재시도" />
+                </button>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
+      {!adminSettings && (
+        <p className="qc-notice">
+          {selectedProfile?.status !== 'active' ||
+          !selectedProfile.profile.instructions?.some((i) => i.enabled)
+            ? uiText(
+                '관리자가 AI 지침을 등록·시험·활성화해야 Gemini 검수를 실행할 수 있습니다.',
+              )
+            : !state?.mappings.some((m) => m.confirmed)
+              ? uiText(
+                  '자료 자동 확인·저장 후 열 연결을 확인하면 Gemini 검수를 시작할 수 있습니다.',
+                )
+              : uiText(
+                  'Gemini는 승인된 AI 지침으로 표본을 검토합니다. 기본검사는 AI를 사용하지 않습니다.',
+                )}
+        </p>
+      )}
+      {!!selectedProfile?.profile.instructions?.some((i) => i.enabled) && (
+        <section className="qc-notice">
+          {adminSettings && (
+            <label>
+              <input
+                type="checkbox"
+                checked={includeAi}
+                disabled={!!busy}
+                onChange={(event) =>
+                  setAiProfileId(event.target.checked ? profileId : null)
+                }
+              />{' '}
+              {locale === 'vi'
+                ? 'Áp dụng quy tắc AI · Kiểm tra mẫu bằng khóa công ty'
+                : 'AI 지침 적용 · 회사 공용 키로 표본 검수'}
+            </label>
+          )}
+          <p>
+            {locale === 'vi'
+              ? 'Tối đa 60 cặp dòng–quy tắc / 48KiB. Ví dụ: 10 quy tắc = tối đa 6 dòng. Không gửi toàn bộ tệp; phần còn lại chưa được AI kiểm tra. Có tính phí API.'
+              : '최대 60개 행·지침 조합 / 48KiB · 지침 10개이면 최대 6행 · 원본 파일 전체 미전송 · 유료 API 사용. 나머지는 AI 미검수로 표시합니다.'}
+          </p>
+        </section>
+      )}
+      {aiConfirmation && (
+        <section className="qc-notice" aria-label="AI 검수 실행 확인">
+          <p role="alert">
+            {locale === 'vi'
+              ? 'Gửi dữ liệu đã ánh xạ và quy tắc cho Google Gemini bằng khóa công ty? Tối đa 60 cặp dòng–quy tắc / 48KiB. Có tính phí; phần còn lại chưa được AI kiểm tra.'
+              : '회사 공용 키로 미전송 자료를 순차 검수할까요? 묶음당 최대 60개 행·지침 조합(48KiB), 한 번에 최대 10묶음을 처리하며 묶음마다 API 비용이 발생합니다. 성공 결과는 저장하고 실패·중단 시 멈춥니다. 남은 대상은 이후 이어갈 수 있습니다.'}
+          </p>
+          <button
+            className="primary-action"
+            disabled={!!busy || aiConfirmation.profileId !== profileId}
+            onClick={() => {
+              const pending = aiConfirmation;
+              setAiConfirmation(null);
+              if (pending.profileId === profileId)
+                execute(pending.trial, true, true, pending.parentRunId);
+            }}
+          >
+            {locale === 'vi'
+              ? 'Đồng ý và chạy kiểm tra AI'
+              : '동의하고 AI 검수 실행'}
+          </button>
+          <button disabled={!!busy} onClick={() => setAiConfirmation(null)}>
+            {uiText('취소')}
+          </button>
+        </section>
+      )}
       <nav
         className="qc-tabs"
         aria-label={adminSettings ? uiText('지침 관리') : uiText('검수 작업')}
@@ -1291,6 +1479,12 @@ function WorkbenchCase({
                   />
                 </label>
               </div>
+              <AiInstructionEditor
+                instructions={profile.instructions ?? []}
+                onChange={(instructions) =>
+                  setProfile({ ...profile, instructions })
+                }
+              />
               <fieldset>
                 <legend>
                   <UiText text="실행 가능한 검사" />
@@ -1614,6 +1808,33 @@ function WorkbenchCase({
                 </select>
               </label>
               {run ? (
+                <button
+                  disabled={!!busy || !canTriage || !!reason.trim()}
+                  title={
+                    reason.trim()
+                      ? uiText('작성 중인 판단을 먼저 저장해 주세요.')
+                      : undefined
+                  }
+                  onClick={() => {
+                    void perform('보고서 저장 중', async () => {
+                      const result = await request<{ saved: boolean }>({
+                        action: 'save-report',
+                        runId: run.id,
+                      });
+                      if (!result.saved)
+                        throw new Error(
+                          '보고서 저장을 확인하지 못했습니다. 다시 시도해 주세요.',
+                        );
+                      setNotice(
+                        'Excel 보고서 저장 완료. 현재 검수 결과와 저장된 판단을 보관했습니다.',
+                      );
+                    });
+                  }}
+                >
+                  <Save /> <UiText text="보고서 저장" />
+                </button>
+              ) : null}
+              {run ? (
                 <a
                   className="qc-download"
                   download
@@ -1630,11 +1851,107 @@ function WorkbenchCase({
           </div>
           {run ? (
             <>
+              <section className="qc-notice" aria-label="전체 자료 검수 대조">
+                {!!busy && (
+                  <button
+                    onClick={() => {
+                      stopAiBatches.current = true;
+                    }}
+                  >
+                    현재 묶음 저장 후 중단
+                  </button>
+                )}
+                {run.aiChecks && (
+                  <>
+                    <p>
+                      미전송{' '}
+                      {
+                        run.aiChecks.filter((c) => c.status === 'pending')
+                          .length
+                      }{' '}
+                      · 실패{' '}
+                      {run.aiChecks.filter((c) => c.status === 'failed').length}{' '}
+                      · 판단불가{' '}
+                      {run.aiChecks.filter((c) => c.status === 'unable').length}{' '}
+                      · 제외{' '}
+                      {
+                        run.aiChecks.filter((c) => c.status === 'excluded')
+                          .length
+                      }{' '}
+                      (행·지침 조합)
+                    </p>
+                    <button
+                      disabled={
+                        !!busy ||
+                        profileId !== run.profileId ||
+                        !run.aiChecks.some((c) => c.status === 'pending')
+                      }
+                      onClick={() => execute(run.trial, true, false, run.id)}
+                    >
+                      미전송 다음 묶음 검수
+                    </button>
+                    <p>
+                      이전 평가 결과는 보존합니다. 실패·판단불가 항목은 자동
+                      재전송하지 않습니다.
+                    </p>
+                  </>
+                )}
+                <h3>{completeness!.label}</h3>
+                <p>
+                  현재 자료 기록·실행 시점 기준 · 행·지침 조합{' '}
+                  {completeness!.evaluatedPairs}/{completeness!.totalPairs}
+                </p>
+                <p>
+                  파일 {run.sourceAudit?.inspectedFiles ?? '?'}/
+                  {run.sourceAudit?.registeredFiles ?? '?'} · 시트{' '}
+                  {run.sourceAudit?.mappedSheets ?? '?'}/
+                  {run.sourceAudit?.totalSheets ?? '?'}
+                </p>
+                <ul>
+                  {completeness!.issues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+                <p>
+                  결과 저장은 검수 완료와 다릅니다. 제외·미평가·실패가 남은
+                  결과를 전체 검수 완료로 취급하지 않습니다.
+                </p>
+              </section>
+              {run.ai && (
+                <section className="qc-notice">
+                  <h3>
+                    {locale === 'vi'
+                      ? 'Lịch sử kiểm tra AI'
+                      : 'AI 지침 검수 실행 기록'}
+                  </h3>
+                  <p>
+                    {run.ai.model} · {run.ai.state} · {run.ai.evaluatedRows}/
+                    {run.ai.totalRows}{' '}
+                    {locale === 'vi' ? 'dòng được đánh giá' : '행 평가'}
+                  </p>
+                  <p>
+                    {locale === 'vi'
+                      ? 'Token đầu vào / đầu ra'
+                      : '입력 / 출력 토큰'}
+                    : {run.ai.inputTokens ?? 'N/A'} /{' '}
+                    {run.ai.outputTokens ?? 'N/A'} ·{' '}
+                    {locale === 'vi'
+                      ? 'Chi phí: chưa xác định; xem hóa đơn Google'
+                      : '비용: 단가 미확정 · Google 청구 내역 확인'}
+                  </p>
+                  <p>
+                    {locale === 'vi'
+                      ? 'AI chỉ đưa ra ứng viên cần xác minh, không xác nhận số lượng đúng.'
+                      : 'AI는 확인 필요 후보를 제시합니다. 미평가 행과 근거 부족 항목은 정상 판정이 아닙니다.'}
+                  </p>
+                </section>
+              )}
               <div className="qc-coverage">
                 {run.coverage
                   .filter(
                     (c) =>
                       adminSettings ||
+                      c.ruleId.startsWith('AI-') ||
                       (mode === 'duplicate-ai'
                         ? c.ruleId === 'ITEM-018'
                         : c.ruleId !== 'ITEM-018'),

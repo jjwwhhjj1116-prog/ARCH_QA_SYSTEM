@@ -1,20 +1,18 @@
 'use client';
 import { UiText, useUiText } from './ui-translation';
+import { WorkflowNavigation } from './workflow-navigation';
+import { CompanyDriveSettings } from './company-drive-settings';
+import { AccountSettings } from './account-settings';
 
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
   Check,
   ChevronDown,
-  FileScan,
-  FileSpreadsheet,
   FolderKanban,
   FolderPlus,
   Link2Off,
-  Layers3,
   Menu,
-  Search,
   Settings,
   UserRound,
   X,
@@ -35,17 +33,21 @@ import type {
   ReviewCaseSummary,
 } from '@/lib/domain/contracts';
 import { canonicalSourceFilename } from '@/lib/imports/source-filename';
+import { readUploadResponse } from '@/lib/http/upload-response';
+import {
+  uploadResumable,
+  ResumableUploadError,
+} from '@/lib/http/resumable-upload';
 import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import {
   hasUsableStoredSources,
   isPendingReplacement,
+  pendingInspectionSources,
 } from '@/lib/ingestion/document-checklist';
-import type { StoredUploadSummary } from '@/lib/ingestion/repository';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewWorkbench } from './review-workbench';
 import {
   ProjectArchiveDialog,
-  ProjectCreationForm,
   ProjectRegistrationWorkspace,
 } from './project-registration-workspace';
 import { ModuleWorkspace, type StudioView } from './review-modules';
@@ -92,6 +94,7 @@ function ReviewStudioContent({
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [message, setMessage] = useState('프로젝트를 불러오는 중입니다.');
   const [messageTone, setMessageTone] = useState<MessageTone>('neutral');
+  const [preparationProgress, setPreparationProgress] = useState('');
   const [showCreate, setShowCreate] = useState<'sidebar' | 'workspace' | null>(
     null,
   );
@@ -104,10 +107,19 @@ function ReviewStudioContent({
     null,
   );
   const [mobileNav, setMobileNav] = useState(false);
-  const [activeView, setActiveView] = useState<StudioView>('project-register');
-  const [settingsSection, setSettingsSection] = useState<'general' | 'rules'>(
-    'general',
-  );
+  const [activeView, setActiveView] = useState<StudioView>('home');
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (
+        new URLSearchParams(window.location.search).get('view') === 'settings'
+      )
+        setActiveView('settings');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  const [settingsSection, setSettingsSection] = useState<
+    'general' | 'admin' | 'rules'
+  >('general');
   const reviewNavigationGuard = useRef<(() => boolean) | null>(null);
   const registerReviewNavigationGuard = useCallback(
     (guard: (() => boolean) | null) => {
@@ -178,6 +190,10 @@ function ReviewStudioContent({
       if (reviewNavigationGuard.current && !reviewNavigationGuard.current())
         return false;
       setActiveView(view);
+      const url = new URL(window.location.href);
+      if (view === 'settings') url.searchParams.set('view', 'settings');
+      else url.searchParams.delete('view');
+      window.history.replaceState(null, '', url);
       if (mobileNav) {
         setMobileNav(false);
       }
@@ -197,6 +213,8 @@ function ReviewStudioContent({
     setMobileNav(false);
     setReviewCaseId(null);
     if (selectedProjectIdRef.current !== projectId) {
+      setMessageTone('neutral');
+      setMessage('선택한 프로젝트의 자료 등록 상태를 확인합니다.');
       selectionEpochRef.current += 1;
       selectedProjectIdRef.current = projectId;
       setSelectedProjectId(projectId);
@@ -664,9 +682,8 @@ function ReviewStudioContent({
           }),
         },
       );
-      const packageBody = (await packageResponse.json()) as
-        | ApiSuccessEnvelope<SourcePackageSummary>
-        | ApiErrorEnvelope;
+      const packageBody =
+        await readUploadResponse<SourcePackageSummary>(packageResponse);
       if (!packageResponse.ok || 'error' in packageBody) {
         throw new Error(
           'error' in packageBody
@@ -681,12 +698,13 @@ function ReviewStudioContent({
         ),
       );
       completed = packageBody.data.files.filter(
-        (file) => file.status === 'stored',
+        (file) => file.status === 'stored' || file.status === 'uploaded',
       ).length;
       setUploadCompletedCount(completed);
       const failures: UploadFailure[] = [];
       for (const intent of packageBody.data.files) {
-        if (intent.status === 'stored') continue;
+        if (intent.status === 'stored' || intent.status === 'uploaded')
+          continue;
         const file = filesByKey.get(
           `${intent.filename}\u0000${intent.sizeBytes}`,
         );
@@ -700,9 +718,19 @@ function ReviewStudioContent({
           continue;
         }
         setUploadProgress(
-          `${intent.filename} 검사·저장 중 (${completed + failures.length + 1}/${total})`,
+          `${intent.filename} 업로드 중 · ${completed}/${total}개 완료`,
         );
         try {
+          if (intent.transferMode === 'resumable') {
+            await uploadResumable(intent.uploadId, file, (ack, size) => {
+              setUploadProgress(
+                `${intent.filename} · ${Math.floor((ack / size) * 100)}% · ${completed}/${total}개 등록 완료`,
+              );
+            });
+            completed += 1;
+            setUploadCompletedCount(completed);
+            continue;
+          }
           const response = await fetch(
             `/api/uploads/${intent.uploadId}/bytes`,
             {
@@ -711,9 +739,7 @@ function ReviewStudioContent({
               body: file,
             },
           );
-          const body = (await response.json()) as
-            | ApiSuccessEnvelope<StoredUploadSummary>
-            | ApiErrorEnvelope;
+          const body = await readUploadResponse(response);
           if (!response.ok || 'error' in body) {
             failures.push(
               'error' in body
@@ -734,12 +760,21 @@ function ReviewStudioContent({
           }
           completed += 1;
           setUploadCompletedCount(completed);
-        } catch {
+        } catch (error) {
           failures.push({
             filename: intent.filename,
-            code: 'NETWORK_ERROR',
+            code:
+              error instanceof ResumableUploadError
+                ? error.code
+                : 'NETWORK_ERROR',
+            requestId:
+              error instanceof ResumableUploadError
+                ? error.requestId
+                : undefined,
             message:
-              '서버 연결이 끊겼습니다. 이 파일만 다시 시도할 수 있습니다.',
+              error instanceof ResumableUploadError
+                ? error.message
+                : '서버 연결이 끊겼습니다. 이 파일만 다시 시도할 수 있습니다.',
           });
           setUploadFailures([...failures]);
         }
@@ -752,9 +787,27 @@ function ReviewStudioContent({
         (item) => item.id === packageBody.data.id,
       );
       const persistedCount = persistedPackage
-        ? persistedPackage.files.filter((file) => file.status === 'stored')
-            .length
+        ? persistedPackage.files.filter(
+            (file) => file.status === 'stored' || file.status === 'uploaded',
+          ).length
         : completed;
+      if (persistedPackage) {
+        // A response can be interrupted after commit. The refreshed server list
+        // is authoritative: don't report a stored file as failed or retry it.
+        const storedNames = new Set(
+          persistedPackage.files
+            .filter(
+              (file) => file.status === 'stored' || file.status === 'uploaded',
+            )
+            .map((file) => file.filename),
+        );
+        failures.splice(
+          0,
+          failures.length,
+          ...failures.filter((failure) => !storedNames.has(failure.filename)),
+        );
+        setUploadFailures([...failures]);
+      }
       if (!persistedPackage && failures.length === 0) {
         throw new Error('저장 결과를 서버 목록에서 다시 확인하지 못했습니다.');
       }
@@ -775,7 +828,14 @@ function ReviewStudioContent({
         );
         return;
       }
-      if (persistedPackage && isPendingReplacement(persistedPackage)) {
+      const inspectionPending = Boolean(
+        persistedPackage?.files.some((file) => file.status === 'uploaded'),
+      );
+      if (
+        persistedPackage &&
+        isPendingReplacement(persistedPackage) &&
+        !inspectionPending
+      ) {
         setUploadProgress('새 파일 저장 완료 · 기존 자료를 교체하는 중…');
         await requestReplacement(persistedPackage);
         persistedPackages = await loadSourcePackages(
@@ -792,9 +852,11 @@ function ReviewStudioContent({
         }
       }
       setUploadProgress(
-        uploadMode === 'replace'
-          ? `${persistedCount}/${total}개 파일로 교체 완료 · 이전 자료는 검수 대상에서 제외하고 이력으로 보관했습니다.`
-          : `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
+        inspectionPending
+          ? `${persistedCount}/${total}개 원본 저장 완료 · 검수 준비 대기${uploadMode === 'replace' ? ' · 교체 미적용, 기존 자료 유지' : ''}`
+          : uploadMode === 'replace'
+            ? `${persistedCount}/${total}개 파일로 교체 완료 · 이전 자료는 검수 대상에서 제외하고 이력으로 보관했습니다.`
+            : `${persistedCount}/${total}개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.`,
       );
       setUploadStatus('success');
       if (selectedProjectIdRef.current === targetProjectId) {
@@ -805,7 +867,9 @@ function ReviewStudioContent({
       }
       setMessageTone('success');
       setMessage(
-        `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
+        inspectionPending
+          ? `${persistedCount}개 원본을 저장했습니다. 원본 저장과 검수 준비는 별개이며, 파일 내용 검사·매핑 전에는 AI 검수 대상으로 사용하지 않습니다.`
+          : `${persistedCount}개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다. AI 검수 엔진은 아직 실행하지 않았습니다.`,
       );
       setSourceFiles([]);
       setUploadMode('append');
@@ -819,7 +883,9 @@ function ReviewStudioContent({
       const persistedCount = packageId
         ? (persistedPackages
             ?.find((item) => item.id === packageId)
-            ?.files.filter((file) => file.status === 'stored').length ?? 0)
+            ?.files.filter(
+              (file) => file.status === 'stored' || file.status === 'uploaded',
+            ).length ?? 0)
         : 0;
       const confirmedCount = persistedPackages ? persistedCount : completed;
       setUploadStatus('error');
@@ -831,9 +897,11 @@ function ReviewStudioContent({
           : '산출서와 집계표를 저장하지 못했습니다.',
       );
       setUploadProgress(
-        persistedPackages
-          ? `${persistedCount}/${total}개 서버 저장 확인 · 중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.`
-          : `${completed}/${total}개 저장 응답 · 서버 목록 재확인에 실패했습니다. 목록을 다시 불러온 뒤 재시도하세요.`,
+        !packageId
+          ? '자료 등록 요청을 완료하지 못했습니다. 파일 전송은 시작하지 않았으며 선택 파일은 유지됩니다.'
+          : persistedPackages
+            ? `${persistedCount}/${total}개 서버 저장 확인 · 중단된 파일부터 같은 등록 건으로 다시 시도할 수 있습니다.`
+            : `${completed}/${total}개 저장 응답 · 서버 목록 재확인에 실패했습니다. 목록을 다시 불러온 뒤 재시도하세요.`,
       );
     } finally {
       uploadingRef.current = false;
@@ -1119,109 +1187,27 @@ function ReviewStudioContent({
           </strong>
           <span>QUANTITY CONTROL WORKSPACE</span>
         </div>
-        <nav
-          className="primary-nav project-sidebar-nav"
-          aria-label={uiText('프로젝트')}
-        >
+        <WorkflowNavigation
+          view={activeView}
+          selected={Boolean(selectedProject)}
+          ready={hasStoredSources}
+          onNavigate={navigate}
+        />
+        <div className="sidebar-foot">
           <button
-            ref={sidebarAddRef}
-            className="sidebar-project-add"
             type="button"
-            disabled={uploading || submitting}
-            aria-expanded={showCreate === 'sidebar'}
-            aria-controls="sidebar-project-create"
-            onClick={() => {
-              setCreateError('');
-              setShowCreate((value) =>
-                value === 'sidebar' ? null : 'sidebar',
-              );
-            }}
-          >
-            <FolderPlus aria-hidden="true" /> <UiText text="새 프로젝트" />{' '}
-          </button>
-          {showCreate === 'sidebar' && (
-            <div id="sidebar-project-create">
-              <ProjectCreationForm
-                compact
-                submitting={submitting}
-                error={createError}
-                onCreateProject={(event) => void createProject(event)}
-                onToggleCreate={() => setShowCreate(null)}
-              />
-            </div>
-          )}
-          <div className="sidebar-project-heading">
-            <span>
-              <UiText text="프로젝트 목록" />
-            </span>
-            <strong>{projects.length}</strong>
-          </div>
-          <label className="sidebar-project-search">
-            <Search aria-hidden="true" />
-            <span className="sr-only">
-              <UiText text="좌측 프로젝트 검색" />
-            </span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={uiText('프로젝트 검색')}
-            />
-          </label>
-          <div className="sidebar-project-list">
-            {visibleProjects.map((project) => (
-              <div
-                className={`sidebar-project-item${selectedProjectId === project.id ? ' is-current' : ''}`}
-                key={project.id}
-              >
-                <button
-                  className="sidebar-project-select"
-                  type="button"
-                  aria-current={
-                    selectedProjectId === project.id ? 'true' : undefined
-                  }
-                  disabled={uploading}
-                  onClick={() => selectProject(project.id)}
-                >
-                  <FolderKanban aria-hidden="true" />
-                  <span>
-                    <strong>{project.name}</strong>
-                    <small>
-                      {project.clientName || uiText('ERP 연동 대기')}
-                    </small>
-                  </span>
-                </button>
-                {(project.role === 'workspace_admin' ||
-                  project.role === 'project_owner') && (
-                  <button
-                    className="sidebar-project-delete"
-                    type="button"
-                    aria-label={`${project.name} 삭제`}
-                    disabled={uploading || archivingProjectId !== null}
-                    onClick={() => requestArchiveProject(project)}
-                  >
-                    {archivingProjectId === project.id
-                      ? uiText('삭제 중')
-                      : uiText('삭제')}
-                  </button>
-                )}
-              </div>
-            ))}
-            {loadState === 'ready' && visibleProjects.length === 0 && (
-              <p>
-                <UiText text="검색 조건에 맞는 프로젝트가 없습니다." />
-              </p>
-            )}
-          </div>
-          <button
-            className={`sidebar-settings${activeView === 'settings' ? ' is-current' : ''}`}
-            type="button"
+            className="workflow-link sidebar-settings"
+            aria-current={activeView === 'settings' ? 'page' : undefined}
             onClick={() => navigate('settings')}
           >
-            <Settings aria-hidden="true" /> <UiText text="설정" />{' '}
+            <Settings aria-hidden="true" />
+            <span>
+              <UiText text="설정" />
+            </span>
+            {activeView === 'settings' && (
+              <Check className="nav-current-check" aria-hidden="true" />
+            )}
           </button>
-        </nav>
-        <div className="sidebar-foot">
           <div className="employee-profile">
             <span className="employee-avatar" aria-hidden="true">
               <UserRound />
@@ -1341,19 +1327,10 @@ function ReviewStudioContent({
           </div>
           <span className="qc-release-marker">
             {' '}
-            <UiText text="FIN 검수 작업실 · v19 · 2026.09.08" />{' '}
+            <UiText text="FIN 검수 작업실 · v20 · 2026.09.08" />{' '}
           </span>
           <LanguageSwitch />
         </header>
-
-        {activeView !== 'settings' && (
-          <WorkflowRail
-            activeView={activeView}
-            hasSelectedProject={Boolean(selectedProject)}
-            hasStoredSources={hasStoredSources}
-            onNavigate={navigate}
-          />
-        )}
 
         <main
           id="main-content"
@@ -1361,9 +1338,123 @@ function ReviewStudioContent({
           ref={mainHeadingRef}
           tabIndex={-1}
         >
-          {activeView === 'project-register' ? (
+          {activeView === 'home' ? (
+            <section className="qc-home" aria-labelledby="home-title">
+              {selectedProject && (
+                <p className="qc-current-project">
+                  {uiText('현재 프로젝트')}:{' '}
+                  <strong>{selectedProject.name}</strong>
+                </p>
+              )}
+              <header className="qc-home-heading">
+                <div>
+                  <h1 id="home-title">{uiText('검수 작업 홈')}</h1>
+                  <p>
+                    {uiText(
+                      '프로젝트를 선택하고, 자료 등록부터 검수 결과 확인까지 이어서 진행하세요.',
+                    )}
+                  </p>
+                </div>
+                <button
+                  ref={sidebarAddRef}
+                  className="sidebar-project-add"
+                  type="button"
+                  disabled={uploading || submitting}
+                  onClick={() => {
+                    if (navigate('project-register')) {
+                      setCreateError('');
+                      setShowCreate('workspace');
+                    }
+                  }}
+                >
+                  <FolderPlus />
+                  {uiText('새 프로젝트')}
+                </button>
+              </header>
+              <div className="qc-home-body">
+                <div>
+                  <h2>{uiText('프로젝트')}</h2>
+                  {loadState === 'loading' ? (
+                    <output>{uiText('프로젝트를 불러오는 중입니다.')}</output>
+                  ) : loadState === 'error' ? (
+                    <div role="alert">
+                      <p>{message}</p>
+                      <button
+                        className="primary-action"
+                        onClick={() => void loadProjects()}
+                      >
+                        {uiText('다시 시도')}
+                      </button>
+                    </div>
+                  ) : projects.length === 0 ? (
+                    <div className="qc-home-empty">
+                      <h3>{uiText('첫 검수 프로젝트를 등록하세요')}</h3>
+                      <p>
+                        {uiText(
+                          '오른쪽 위 새 프로젝트를 누르면 시작할 수 있습니다.',
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="qc-home-projects">
+                      {projects.map((project) => (
+                        <li key={project.id}>
+                          <button
+                            onClick={() => selectProject(project.id)}
+                            disabled={uploading}
+                          >
+                            <FolderKanban />
+                            <span>
+                              <strong>{project.name}</strong>
+                              <small>{project.clientName}</small>
+                            </span>
+                            <ArrowRight />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    className="secondary-action"
+                    onClick={() => navigate('project-register')}
+                  >
+                    {uiText('프로젝트 전체 관리')}
+                    <ArrowRight />
+                  </button>
+                </div>
+                <aside className="qc-home-guide">
+                  <h2>{uiText('작업 순서')}</h2>
+                  <ol>
+                    <li>
+                      <strong>{uiText('자료등록')}</strong>
+                      <p>
+                        {uiText('팀을 선택하고 산출서와 집계표를 등록합니다.')}
+                      </p>
+                    </li>
+                    <li>
+                      <strong>{uiText('AI 검수')}</strong>
+                      <p>{uiText('산출식과 중복 ITEM을 구분해 검토합니다.')}</p>
+                    </li>
+                    <li>
+                      <strong>{uiText('수량산출 분석표')}</strong>
+                      <p>{uiText('공종별 근거와 검토 결과를 확인합니다.')}</p>
+                    </li>
+                  </ol>
+                  <button
+                    className="secondary-action"
+                    onClick={() => navigate('settings')}
+                  >
+                    {uiText('API · 저장소 연결 설정')}
+                    <ArrowRight />
+                  </button>
+                </aside>
+              </div>
+            </section>
+          ) : activeView === 'project-register' ? (
             <ProjectRegistrationWorkspace
               projects={projects}
+              createError={createError}
+              createButtonRef={sidebarAddRef}
               visibleProjects={visibleProjects}
               loadState={loadState}
               message={message}
@@ -1406,7 +1497,8 @@ function ReviewStudioContent({
                 uploadKeyRef.current = `source-package-${crypto.randomUUID()}`;
               }}
               onApplyReplacement={(item) => void applyStoredReplacement(item)}
-              uploading={uploading}
+              uploading={uploading || Boolean(preparationProgress)}
+              preparationProgress={preparationProgress}
               uploadProgress={uploadProgress}
               uploadStatus={uploadStatus}
               uploadCompletedCount={uploadCompletedCount}
@@ -1432,6 +1524,8 @@ function ReviewStudioContent({
                 void archiveSourcePackage(sourcePackage)
               }
               onContinueToAiReview={() => {
+                if (uploadingRef.current || !selectedProject || !uploadCaseId)
+                  return;
                 if (
                   sourceFiles.length > 0 &&
                   !window.confirm(
@@ -1441,9 +1535,53 @@ function ReviewStudioContent({
                   )
                 )
                   return;
-                setReviewCaseId(uploadCaseId);
-                closeSourceUpload();
-                navigate('formula-ai');
+                const targetProject = selectedProject.id;
+                const targetCase = uploadCaseId;
+                const pending = pendingInspectionSources(sourcePackages);
+                uploadingRef.current = true;
+                void (async () => {
+                  try {
+                    for (const [index, file] of pending.entries()) {
+                      setPreparationProgress(
+                        `검수 준비 ${index + 1}/${pending.length}`,
+                      );
+                      const response = await fetch(
+                        `/api/projects/${targetProject}/review`,
+                        {
+                          method: 'POST',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify({
+                            action: 'prepare-source',
+                            caseId: targetCase,
+                            uploadId: file.uploadId,
+                          }),
+                        },
+                      );
+                      const body = (await response.json()) as
+                        | ApiSuccessEnvelope<unknown>
+                        | ApiErrorEnvelope;
+                      if (!response.ok || 'error' in body)
+                        throw new Error(
+                          `${file.filename}: ${'error' in body ? body.error.message : '검수 준비를 마치지 못했습니다.'}`,
+                        );
+                    }
+                    uploadingRef.current = false;
+                    setReviewCaseId(targetCase);
+                    closeSourceUpload();
+                    navigate('formula-ai');
+                  } catch (error) {
+                    setMessageTone('error');
+                    setMessage(
+                      error instanceof Error
+                        ? error.message
+                        : '검수 준비에 실패했습니다. 등록 원본은 보존됩니다.',
+                    );
+                    await loadSourcePackages(targetProject, targetCase);
+                  } finally {
+                    uploadingRef.current = false;
+                    setPreparationProgress('');
+                  }
+                })();
               }}
               onUpload={(event) => void uploadSources(event)}
             />
@@ -1491,18 +1629,53 @@ function ReviewStudioContent({
                   {' '}
                   <UiText text="개인 설정" />{' '}
                 </button>
-                {selectedProject && currentUser.isAdmin && (
+                {currentUser.isAdmin && (
+                  <button
+                    aria-current={
+                      settingsSection !== 'general' ? 'page' : undefined
+                    }
+                    onClick={() => {
+                      if (
+                        !reviewNavigationGuard.current ||
+                        reviewNavigationGuard.current()
+                      )
+                        setSettingsSection('admin');
+                    }}
+                  >
+                    {' '}
+                    <UiText text="관리자 설정" />{' '}
+                  </button>
+                )}
+              </nav>
+              {settingsSection !== 'general' && currentUser.isAdmin && (
+                <nav
+                  className="qc-tabs"
+                  aria-label={uiText('관리자 설정 메뉴')}
+                >
+                  <button
+                    aria-current={
+                      settingsSection === 'admin' ? 'page' : undefined
+                    }
+                    onClick={() => {
+                      if (
+                        !reviewNavigationGuard.current ||
+                        reviewNavigationGuard.current()
+                      )
+                        setSettingsSection('admin');
+                    }}
+                  >
+                    <UiText text="API · 회사 Drive" />
+                  </button>
                   <button
                     aria-current={
                       settingsSection === 'rules' ? 'page' : undefined
                     }
                     onClick={() => setSettingsSection('rules')}
                   >
-                    {' '}
-                    <UiText text="검수 지침 관리 · 관리자" />{' '}
+                    <UiText text="검수 지침 관리" />
                   </button>
-                )}
-              </nav>
+                </nav>
+              )}
               {settingsSection === 'rules' &&
               selectedProject &&
               currentUser.isAdmin ? (
@@ -1518,7 +1691,22 @@ function ReviewStudioContent({
                   onCaseChange={setReviewCaseId}
                   onSources={() => navigate('project-data')}
                 />
-              ) : (
+              ) : settingsSection === 'rules' && currentUser.isAdmin ? (
+                <section className="settings-card">
+                  <h1>
+                    <UiText text="검수 지침 관리" />
+                  </h1>
+                  <p>
+                    <UiText text="지침을 관리할 프로젝트를 먼저 선택해 주세요." />
+                  </p>
+                  <button
+                    className="primary-action"
+                    onClick={() => navigate('project-register')}
+                  >
+                    <UiText text="프로젝트 선택" />
+                  </button>
+                </section>
+              ) : settingsSection === 'admin' && currentUser.isAdmin ? (
                 <>
                   <ModuleWorkspace
                     isAdmin={currentUser.isAdmin}
@@ -1527,6 +1715,38 @@ function ReviewStudioContent({
                     reviewCases={reviewCases}
                     onOpenProjects={() => navigate('project-register')}
                   />
+                  <CompanyDriveSettings />
+                </>
+              ) : (
+                <>
+                  <header className="qc-settings-heading">
+                    <div>
+                      <h1>
+                        <UiText text="개인 설정" />
+                      </h1>
+                      <p>
+                        <UiText text="내 계정과 화면 환경을 관리합니다." />
+                      </p>
+                    </div>
+                  </header>
+                  {employeeLogin ? (
+                    <AccountSettings
+                      email={currentUser.email}
+                      displayName={currentUser.displayName}
+                    />
+                  ) : (
+                    <section className="settings-card">
+                      <h2>
+                        <UiText text="내 계정" />
+                      </h2>
+                      <p>
+                        {currentUser.displayName} · {currentUser.email}
+                      </p>
+                      <p>
+                        <UiText text="비밀번호 변경은 직원 계정으로 로그인한 경우 사용할 수 있습니다." />
+                      </p>
+                    </section>
+                  )}
                   <PersonalPreferences />
                 </>
               )}
@@ -1553,211 +1773,10 @@ function ReviewStudioContent({
   );
 }
 
-function WorkflowRail({
-  activeView,
-  hasSelectedProject,
-  hasStoredSources,
-  onNavigate,
-}: {
-  activeView: StudioView;
-  hasSelectedProject: boolean;
-  hasStoredSources: boolean;
-  onNavigate: (view: StudioView) => void;
-}) {
-  const uiText = useUiText();
-  const activeStep = workflowStage(activeView)?.stage ?? 1;
-  const steps = [
-    {
-      number: 1,
-      label: '자료 등록',
-      description: '프로젝트 · 산출서 · 집계표',
-      icon: FileSpreadsheet,
-      disabled: false,
-      target: hasSelectedProject ? 'project-data' : 'project-register',
-    },
-    {
-      number: 2,
-      label: 'AI 검수',
-      description: '산출식 이상치 · 중복 ITEM',
-      icon: FileScan,
-      disabled: !hasSelectedProject || !hasStoredSources,
-      target: 'formula-ai',
-    },
-    {
-      number: 3,
-      label: '수량산출 분석표',
-      description: '마감팀 분석표 우선',
-      icon: BarChart3,
-      disabled: !hasSelectedProject || !hasStoredSources,
-      target: 'analysis-finish-interior',
-    },
-  ] as const;
-  const analysisActive = activeStep === 3;
-  return (
-    <section className="workflow-rail" aria-labelledby="workflow-title">
-      <div className="workflow-rail-heading">
-        <div>
-          <span>QC WORKFLOW</span>
-          <strong id="workflow-title">
-            <UiText text="검수 진행 단계" />
-          </strong>
-        </div>
-        {!hasStoredSources && hasSelectedProject && (
-          <small>
-            <UiText text="STEP 2부터는 자료 저장 완료 후 열립니다." />
-          </small>
-        )}
-      </div>
-      <ol>
-        {steps.map((step) => {
-          const current = activeStep === step.number;
-          const completed =
-            step.number === 1 ? hasStoredSources : step.number < activeStep;
-          return (
-            <li
-              key={step.number}
-              data-state={
-                current ? 'current' : completed ? 'complete' : 'waiting'
-              }
-            >
-              <button
-                type="button"
-                disabled={step.disabled}
-                aria-current={current ? 'step' : undefined}
-                aria-describedby={
-                  step.disabled
-                    ? `workflow-step-${step.number}-reason`
-                    : undefined
-                }
-                onClick={() => onNavigate(step.target)}
-              >
-                <span className="workflow-step-number">
-                  {completed && !current ? (
-                    <Check aria-hidden="true" />
-                  ) : (
-                    `0${step.number}`
-                  )}
-                </span>
-                <span>
-                  <strong>
-                    STEP {step.number} · {uiText(step.label)}
-                  </strong>
-                  <small id={`workflow-step-${step.number}-reason`}>
-                    {step.disabled
-                      ? uiText('자료 등록 필요')
-                      : uiText(step.description)}
-                  </small>
-                </span>
-                <step.icon aria-hidden="true" />
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-      {activeStep === 2 && (
-        <nav
-          className="ai-review-chooser"
-          aria-label={uiText('AI 검수 기능 선택')}
-        >
-          <button
-            className={`ai-review-choice is-formula${activeView === 'formula-ai' ? ' is-active' : ''}`}
-            type="button"
-            aria-label={uiText('산출식 AI 검수')}
-            aria-current={activeView === 'formula-ai' ? 'page' : undefined}
-            onClick={() => onNavigate('formula-ai')}
-          >
-            <span className="ai-review-choice-icon">
-              <FileScan aria-hidden="true" />
-            </span>
-            <span className="ai-review-choice-copy">
-              <small>AI REVIEW 01</small>
-              <strong>
-                <UiText text="산출식 AI 검수" />
-              </strong>
-              <span>
-                {' '}
-                <UiText text="확인된 산식·치수와 지침을 대조합니다. AI 의미 검수는 후속입니다." />{' '}
-              </span>
-            </span>
-            <span className="ai-review-choice-action" aria-hidden="true">
-              {activeView === 'formula-ai'
-                ? uiText('현재 선택')
-                : uiText('검수 화면 열기')}
-              {activeView === 'formula-ai' ? <Check /> : <ArrowRight />}
-            </span>
-          </button>
-          <button
-            className={`ai-review-choice is-duplicate${activeView === 'duplicate-ai' ? ' is-active' : ''}`}
-            type="button"
-            aria-label={uiText('중복 ITEM AI 검수')}
-            aria-current={activeView === 'duplicate-ai' ? 'page' : undefined}
-            onClick={() => onNavigate('duplicate-ai')}
-          >
-            <span className="ai-review-choice-icon">
-              <Layers3 aria-hidden="true" />
-            </span>
-            <span className="ai-review-choice-copy">
-              <small>AI REVIEW 02</small>
-              <strong>
-                <UiText text="중복 ITEM AI 검수" />
-              </strong>
-              <span>
-                <UiText text="동별집계표의 중복 코드·공종 분산 후보를 확인합니다." />
-              </span>
-            </span>
-            <span className="ai-review-choice-action" aria-hidden="true">
-              {activeView === 'duplicate-ai'
-                ? uiText('현재 선택')
-                : uiText('검수 화면 열기')}
-              {activeView === 'duplicate-ai' ? <Check /> : <ArrowRight />}
-            </span>
-          </button>
-        </nav>
-      )}
-      {analysisActive && (
-        <nav
-          className="workflow-subnav analysis-subnav"
-          aria-label={uiText('분석표 종류')}
-        >
-          <button type="button" disabled>
-            {' '}
-            <UiText text="분석표 개요" />{' '}
-            <small>
-              <UiText text="준비 중" />
-            </small>
-          </button>
-          <button type="button" disabled>
-            {' '}
-            <UiText text="구조팀" />{' '}
-            <small>
-              <UiText text="준비 중" />
-            </small>
-          </button>
-          {[
-            ['analysis-finish-interior', uiText('마감 · 내부')],
-            ['analysis-finish-exterior', uiText('마감 · 외부')],
-            ['analysis-finish-masonry', uiText('마감 · 조적')],
-            ['analysis-finish-window', uiText('마감 · 창호')],
-          ].map(([view, label]) => (
-            <button
-              key={view}
-              className={activeView === view ? 'is-active' : undefined}
-              type="button"
-              aria-current={activeView === view ? 'page' : undefined}
-              onClick={() => onNavigate(view as StudioView)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
-    </section>
-  );
-}
-
 function workflowStage(
   view: StudioView,
 ): { label: string; stage: number | null; tone: string } | null {
+  if (view === 'home') return { label: '홈', stage: null, tone: 'slate' };
   if (view === 'settings') return { label: '설정', stage: null, tone: 'slate' };
   if (view === 'project-register' || view === 'project-data')
     return { label: '자료 등록', stage: 1, tone: 'amber' };

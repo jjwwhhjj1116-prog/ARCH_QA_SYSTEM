@@ -1,5 +1,5 @@
 // Local production-Worker smoke test. Never accepts a remote target or real roster.
-import { randomUUID, randomBytes, pbkdf2Sync } from 'node:crypto';
+import { randomUUID, randomBytes, scryptSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ const id = randomUUID();
 const email = `synthetic-${id}@example.test`;
 const password = randomBytes(24).toString('hex');
 const salt = randomBytes(16).toString('hex');
-const hash = `pbkdf2-sha256$600000$${salt}$${pbkdf2Sync(password, Buffer.from(salt, 'hex'), 600000, 32, 'sha256').toString('hex')}`;
+const hash = `scrypt$16384$8$5$${salt}$${scryptSync(password, Buffer.from(salt, 'hex'), 32, { N: 16384, r: 8, p: 5, maxmem: 32 * 1024 * 1024 }).toString('hex')}`;
 function sql(statement) {
   const result = spawnSync(
     process.execPath,
@@ -19,7 +19,9 @@ function sql(statement) {
       'DB',
       '--local',
       '--config',
-      'wrangler.local.jsonc',
+      process.env.QC_DIRECT_TEST === 'true'
+        ? 'wrangler.cloudflare.json'
+        : 'wrangler.local.jsonc',
       '--command',
       statement,
     ],
@@ -60,6 +62,14 @@ export function prepareFixture() {
   );
 }
 export async function runHttpTest() {
+  const forged = await fetch(`${origin}/api/projects`, {
+    headers: {
+      'oai-authenticated-user-id': 'forged',
+      'oai-authenticated-user-email': 'yjw@con-cost.com',
+    },
+  });
+  assert.equal(forged.status, 401);
+  await forged.arrayBuffer();
   assert.equal((await send('/api/projects')).status, 401);
   assert.equal(
     (
@@ -73,6 +83,10 @@ export async function runHttpTest() {
     403,
   );
   const response = await send('/api/auth/login', { email, password });
+  if (response.status !== 200)
+    throw new Error(
+      `Synthetic login ${response.status}: ${(await response.text()).slice(0, 2000)}`,
+    );
   assert.equal(response.status, 200);
   const setCookie = response.headers.get('set-cookie');
   assert.match(setCookie, /HttpOnly/);

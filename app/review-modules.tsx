@@ -38,6 +38,7 @@ export type FinishAnalysisView =
 export type TradeAnalysisView = StructureAnalysisView | FinishAnalysisView;
 
 export type StudioView =
+  | 'home'
   | 'project-register'
   | 'project-data'
   | 'formula-ai'
@@ -188,7 +189,10 @@ export const studioNavigation = [
   },
 ] as const satisfies readonly StudioNavigationNode[];
 
-type ModuleView = Exclude<StudioView, 'project-register' | 'project-data'>;
+type ModuleView = Exclude<
+  StudioView,
+  'home' | 'project-register' | 'project-data'
+>;
 
 type ModuleWorkspaceProps = {
   isAdmin?: boolean;

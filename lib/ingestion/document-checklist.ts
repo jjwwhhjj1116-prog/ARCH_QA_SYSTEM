@@ -8,6 +8,22 @@ export function isPendingReplacement(
   );
 }
 
+export function pendingInspectionSources(packages: SourcePackageSummary[]) {
+  return packages
+    .filter(
+      (p) =>
+        !p.supersededBy &&
+        !isPendingReplacement(p) &&
+        !['blocked', 'rejected', 'aborted'].includes(p.status) &&
+        p.projectIdentityStatus !== 'conflict',
+    )
+    .flatMap((p) =>
+      p.files.filter(
+        (f) => f.status === 'uploaded' && f.uploadState === 'uploaded',
+      ),
+    );
+}
+
 export type DocumentRequirement = {
   id: string;
   label: string;

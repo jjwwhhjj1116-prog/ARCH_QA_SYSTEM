@@ -106,11 +106,42 @@ function supersededBySql(alias: 'sp' | 'old') {
 export class D1SourcePackageRepository
   implements SourcePackageRepository, SourceUploadRepository
 {
+  private async assertAvailableScope(
+    projectId: string,
+    reviewCaseId: string,
+    actorId: string,
+    write = false,
+  ) {
+    const scope = await getD1Binding()
+      .prepare(
+        `SELECT p.status AS project_status, rc.status AS case_status, pm.role
+         FROM project_member pm
+         JOIN project p ON p.id=pm.project_id
+         JOIN review_case rc ON rc.project_id=p.id AND rc.id=?
+         WHERE p.id=? AND pm.user_id=?`,
+      )
+      .bind(reviewCaseId, projectId, actorId)
+      .first<{ project_status: string; case_status: string; role: string }>();
+    if (!scope || (write && !uploadRoles.some((role) => role === scope.role)))
+      throw new SourcePackageAccessError(
+        '이 프로젝트와 자료 기록에 접근하거나 자료를 등록할 권한이 없습니다.',
+      );
+    if (scope.project_status !== 'active')
+      throw new SourcePackageConflictError(
+        '보관된 프로젝트입니다. 활성 프로젝트를 선택해 주세요. 기존 자료는 변경하지 않았습니다.',
+      );
+    if (scope.case_status === 'archived')
+      throw new SourcePackageConflictError(
+        '보관된 자료 기록입니다. 사용 중인 자료 기록을 선택해 주세요. 기존 자료는 변경하지 않았습니다.',
+      );
+  }
+
   async listForActor(
     projectId: string,
     reviewCaseId: string,
     actorId: string,
   ): Promise<SourcePackageSummary[]> {
+    await this.assertAvailableScope(projectId, reviewCaseId, actorId);
     const binding = getD1Binding();
     const [membershipRaw, packagesRaw, filesRaw] = await binding.batch([
       binding
@@ -498,6 +529,12 @@ export class D1SourcePackageRepository
   }
 
   async create(record: NewSourcePackageRecord): Promise<SourcePackageSummary> {
+    await this.assertAvailableScope(
+      record.projectId,
+      record.reviewCaseId,
+      record.actor.id,
+      true,
+    );
     const existing = await this.loadExisting(record);
     if (existing) return existing;
 
@@ -708,6 +745,7 @@ export class D1SourcePackageRepository
          INNER JOIN project p ON p.id = ua.project_id
          INNER JOIN project_member pm ON pm.project_id = ua.project_id
          WHERE ua.id = ? AND pm.user_id = ?
+           AND NOT EXISTS (SELECT 1 FROM qc_drive_upload transfer WHERE transfer.upload_id=ua.id)
            AND pm.role IN (${rolePlaceholders})
            AND p.status = 'active' AND rc.status <> 'archived'
            AND sp.status NOT IN ('blocked','rejected','aborted')
@@ -1206,6 +1244,9 @@ function summaryFromRecord(
     status: 'receiving',
     projectIdentityStatus: 'pending',
     files: record.files.map((file) => ({
+      ...(process.env.FILE_STORAGE_PROVIDER === 'google-drive'
+        ? { transferMode: 'resumable' as const }
+        : {}),
       uploadId: file.uploadId,
       sourceFileId: file.sourceFileId,
       sourceVersionId: file.sourceVersionId,
@@ -1226,6 +1267,9 @@ function summaryFromRecord(
 
 function fileSummary(row: ExistingFileRow): SourceUploadIntentSummary {
   return {
+    ...(process.env.FILE_STORAGE_PROVIDER === 'google-drive'
+      ? { transferMode: 'resumable' as const }
+      : {}),
     uploadId: row.upload_id,
     sourceFileId: row.source_file_id,
     sourceVersionId: row.source_version_id,

@@ -1,0 +1,30 @@
+{
+  "appId": "com.concost.qcstudio",
+  "productName": "CONCOST QC Studio",
+  "directories": { "app": "desktop/out", "output": "desktop/release" },
+  "files": [
+    "main.js",
+    "worker.js",
+    "assets/contracts-*.js",
+    "preload.cjs",
+    "ui/**/*",
+    "package.json",
+    "THIRD_PARTY_NOTICES.txt",
+    "runtime-dependencies.json",
+    "!node_modules/**/*"
+  ],
+  "electronDist": "node_modules/electron/dist",
+  "npmRebuild": false,
+  "asar": true,
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "artifactName": "CONCOST-QC-Internal-Preview-Setup-${version}.${ext}"
+}

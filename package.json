@@ -6,8 +6,12 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "desktop:build": "node desktop/build.mjs",
+    "desktop:start": "electron desktop/out/main.js",
+    "desktop:package": "npm run desktop:build && node desktop/package.mjs",
     "dev": "vinext dev",
     "build": "vinext build",
+    "build:cloudflare": "cross-env QC_DEPLOY_TARGET=cloudflare vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt --write .",
@@ -70,6 +74,8 @@
     "@vitest/coverage-v8": "^4.1.11",
     "cross-env": "^10.1.0",
     "drizzle-kit": "0.31.10",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
     "jsdom": "^26.1.0",
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",

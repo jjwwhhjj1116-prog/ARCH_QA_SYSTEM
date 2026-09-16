@@ -6,7 +6,7 @@ export const sourceFileLocatorSchema = z.object({
   caseId: opaqueId,
   sourceVersionId: opaqueId,
   fileId: opaqueId,
-  extension: z.enum(['xlsx', 'xlsm', 'csv', 'pdf']),
+  extension: z.enum(['xlsx', 'xlsm', 'csv', 'pdf', 'dwg', 'dxf']),
 });
 
 export type SourceFileLocator = z.infer<typeof sourceFileLocatorSchema>;

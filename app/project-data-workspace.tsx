@@ -1,4 +1,5 @@
 'use client';
+import { OriginalDownload } from './original-download';
 import { UiText, useUiText } from './ui-translation';
 
 import {
@@ -16,9 +17,11 @@ import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import {
   hasUsableStoredSources,
   isPendingReplacement,
+  pendingInspectionSources,
 } from '@/lib/ingestion/document-checklist';
 import { SourceDocumentChecklist } from './source-document-checklist';
 import { StageHeading } from './project-registration-workspace';
+import { DrawingAttachments } from './drawing-attachments';
 
 type Props = {
   selectedProject: ProjectSummary | null;
@@ -56,6 +59,7 @@ type Props = {
   onRetryPackages: () => void;
   onArchiveSourcePackage: (sourcePackage: SourcePackageSummary) => void;
   onContinueToAiReview: () => void;
+  preparationProgress?: string;
   onUpload: (event: SyntheticEvent<HTMLFormElement, SubmitEvent>) => void;
 };
 
@@ -90,6 +94,7 @@ export function ProjectDataWorkspace({
   onRetryPackages,
   onArchiveSourcePackage,
   onContinueToAiReview,
+  preparationProgress = '',
   onUpload,
 }: Props) {
   const uiText = useUiText();
@@ -99,7 +104,17 @@ export function ProjectDataWorkspace({
       item.discipline === activeCase?.discipline && item.status !== 'archived',
   );
   const hasStoredSources = sourcePackages.some(hasUsableStoredSources);
+  const canPrepare =
+    canUpload && pendingInspectionSources(sourcePackages).length > 0;
   const currentPackages = sourcePackages.filter((item) => !item.supersededBy);
+  const registeredCount = currentPackages.reduce(
+    (count, item) =>
+      count +
+      item.files.filter(
+        (file) => file.status === 'stored' || file.status === 'uploaded',
+      ).length,
+    0,
+  );
   const previousPackages = sourcePackages.filter((item) => item.supersededBy);
   const replacementTargets = currentPackages.filter(
     (item) => !isPendingReplacement(item),
@@ -109,17 +124,24 @@ export function ProjectDataWorkspace({
       className="next-step-action"
       type="button"
       disabled={
-        !hasStoredSources || uploading || sourcePackageState !== 'ready'
+        (!hasStoredSources && !canPrepare) ||
+        uploading ||
+        sourcePackageState !== 'ready'
       }
       title={
-        !hasStoredSources
-          ? uiText('원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.')
+        !hasStoredSources && !canPrepare
+          ? uiText(
+              registeredCount > 0
+                ? '검수 가능한 자료와 실행 권한을 확인해 주세요.'
+                : '산출서를 먼저 등록해 주세요.',
+            )
           : undefined
       }
       onClick={onContinueToAiReview}
     >
       {' '}
-      <UiText text="STEP 2 · AI 검수 시작" /> <ArrowRight aria-hidden="true" />
+      <UiText text={preparationProgress || 'STEP 2 · AI 검수 시작'} />{' '}
+      <ArrowRight aria-hidden="true" />
     </button>
   );
   return (
@@ -150,7 +172,17 @@ export function ProjectDataWorkspace({
         }
       />
 
-      <output className={`system-message ${messageTone}`} aria-live="polite">
+      <output
+        hidden={
+          Boolean(uploadCaseId) &&
+          (messageTone === 'neutral' ||
+            /^\d+개 (원본을 저장했습니다|산출서와 집계표를 저장하고)/u.test(
+              message,
+            ))
+        }
+        className={`system-message ${messageTone}`}
+        aria-live="polite"
+      >
         {messageTone === 'error' ? (
           <AlertTriangle aria-hidden="true" />
         ) : (
@@ -181,10 +213,6 @@ export function ProjectDataWorkspace({
               <UiText text="현재 자료 저장 대상" />
             </span>
             <h2 id="selected-project-title">{selectedProject.name}</h2>
-            <p>
-              {' '}
-              <UiText text="아래에서 등록하는 모든 산출서와 집계표는 이 프로젝트에만 저장됩니다." />{' '}
-            </p>
           </header>
           <div className="case-workbench">
             <div className="case-heading">
@@ -192,9 +220,6 @@ export function ProjectDataWorkspace({
                 <h3>
                   <UiText text="등록할 팀 선택" />
                 </h3>
-                <p>
-                  <UiText text="팀을 선택하면 산출서와 집계표를 바로 등록할 수 있습니다." />
-                </p>
               </div>
               <fieldset className="team-selector">
                 <legend className="sr-only">
@@ -303,15 +328,20 @@ export function ProjectDataWorkspace({
                   </span>
                   <div>
                     <h5>
-                      {hasStoredSources
-                        ? uiText('저장된 자료로 AI 검수 단계로 이동하세요.')
-                        : uiText(
-                            '원본 자료를 저장하면 다음 단계로 이동할 수 있습니다.',
-                          )}
+                      {preparationProgress ||
+                        (uploading
+                          ? `업로드 중 · ${uploadCompletedCount}/${sourceFiles.length}개 완료`
+                          : registeredCount > 0
+                            ? `${registeredCount}개 등록 완료`
+                            : uiText('산출서를 선택하고 등록해 주세요.'))}
                     </h5>
                     <p>
                       {' '}
-                      <UiText text="저장에 실패했거나 미등록인 자료는 제외하고 진행합니다. 검수 전 입력 매핑이 필요하며, 근거가 없는 항목은 미평가로 표시합니다." />{' '}
+                      {registeredCount > 0 && !hasStoredSources
+                        ? uiText(
+                            '자료 등록 완료. AI 검수 시작을 누르면 저장된 자료로 다음 단계를 진행합니다.',
+                          )
+                        : uiText('산출서 등록 → AI 검수 → 결과 확인')}
                     </p>
                   </div>
                   {continueToAiReviewAction}
@@ -340,7 +370,7 @@ export function ProjectDataWorkspace({
                     </h4>
                     <p>
                       {' '}
-                      <UiText text="XLSX·CSV 원본을 수정하지 않고 해시와 계보를 저장합니다." />{' '}
+                      <UiText text="파일을 선택한 뒤 ‘선택 파일 저장’을 누르세요. 원본은 변경하지 않습니다." />{' '}
                     </p>
                   </div>
                   <button
@@ -353,73 +383,78 @@ export function ProjectDataWorkspace({
                     <X aria-hidden="true" />
                   </button>
                 </div>
-                <fieldset
-                  className="source-upload-mode"
-                  disabled={uploading || sourcePackageState !== 'ready'}
-                >
-                  <legend>
-                    <UiText text="자료 등록 방식" />
-                  </legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="source-upload-mode"
-                      value="append"
-                      checked={uploadMode === 'append'}
-                      onChange={() => onUploadModeChange('append')}
-                    />{' '}
-                    <UiText text="추가 등록" />{' '}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="source-upload-mode"
-                      value="replace"
-                      disabled={replacementTargets.length === 0}
-                      checked={uploadMode === 'replace'}
-                      onChange={() => onUploadModeChange('replace')}
-                    />{' '}
-                    <UiText text="기존 자료 교체" />{' '}
-                  </label>
-                  <p>
-                    {uploadMode === 'replace'
-                      ? `현재 자료 기록의 기존 ${replacementTargets.length}묶음을 새 파일로 교체합니다. 새 파일이 모두 저장되기 전까지 기존 자료는 유지됩니다.`
-                      : uiText(
-                          '기존 자료를 유지하고 선택한 파일을 추가합니다.',
-                        )}
-                  </p>
-                  {uploadMode === 'replace' && (
-                    <details>
-                      <summary>
-                        {' '}
-                        <UiText text="교체 대상 확인 ·" />{' '}
-                        {replacementTargets.reduce(
-                          (count, item) => count + item.files.length,
-                          0,
-                        )}{' '}
-                        <UiText text="개 파일" />{' '}
-                      </summary>
-                      <ul>
-                        {replacementTargets.map((item) => (
-                          <li key={item.id}>
-                            {item.displayName} · {item.id.slice(0, 8)}
-                            <ul>
-                              {item.files.map((file) => (
-                                <li key={file.sourceVersionId}>
-                                  {file.filename}
-                                </li>
-                              ))}
-                            </ul>
-                          </li>
-                        ))}
-                      </ul>
-                      <p>
-                        {' '}
-                        <UiText text="다른 팀·이전 자료 기록은 변경하지 않습니다. 교체 후 이전 원본은 이력으로 보관합니다." />{' '}
-                      </p>
-                    </details>
-                  )}
-                </fieldset>
+                <details className="source-registration-options">
+                  <summary>
+                    <UiText text="등록 옵션 · 기존 자료 교체" />
+                  </summary>
+                  <fieldset
+                    className="source-upload-mode"
+                    disabled={uploading || sourcePackageState !== 'ready'}
+                  >
+                    <legend>
+                      <UiText text="자료 등록 방식" />
+                    </legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="source-upload-mode"
+                        value="append"
+                        checked={uploadMode === 'append'}
+                        onChange={() => onUploadModeChange('append')}
+                      />{' '}
+                      <UiText text="추가 등록" />{' '}
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="source-upload-mode"
+                        value="replace"
+                        disabled={replacementTargets.length === 0}
+                        checked={uploadMode === 'replace'}
+                        onChange={() => onUploadModeChange('replace')}
+                      />{' '}
+                      <UiText text="기존 자료 교체" />{' '}
+                    </label>
+                    <p>
+                      {uploadMode === 'replace'
+                        ? `현재 자료 기록의 기존 ${replacementTargets.length}묶음을 새 파일로 교체합니다. 새 파일이 모두 저장되기 전까지 기존 자료는 유지됩니다.`
+                        : uiText(
+                            '기존 자료를 유지하고 선택한 파일을 추가합니다.',
+                          )}
+                    </p>
+                    {uploadMode === 'replace' && (
+                      <details>
+                        <summary>
+                          {' '}
+                          <UiText text="교체 대상 확인 ·" />{' '}
+                          {replacementTargets.reduce(
+                            (count, item) => count + item.files.length,
+                            0,
+                          )}{' '}
+                          <UiText text="개 파일" />{' '}
+                        </summary>
+                        <ul>
+                          {replacementTargets.map((item) => (
+                            <li key={item.id}>
+                              {item.displayName} · {item.id.slice(0, 8)}
+                              <ul>
+                                {item.files.map((file) => (
+                                  <li key={file.sourceVersionId}>
+                                    {file.filename}
+                                  </li>
+                                ))}
+                              </ul>
+                            </li>
+                          ))}
+                        </ul>
+                        <p>
+                          {' '}
+                          <UiText text="다른 팀·이전 자료 기록은 변경하지 않습니다. 교체 후 이전 원본은 이력으로 보관합니다." />{' '}
+                        </p>
+                      </details>
+                    )}
+                  </fieldset>
+                </details>
                 <label className="source-file-picker">
                   <Upload aria-hidden="true" />
                   <span>
@@ -453,18 +488,26 @@ export function ProjectDataWorkspace({
                   </ul>
                 )}
                 {activeCase && sourcePackageState === 'ready' && (
-                  <SourceDocumentChecklist
-                    discipline={activeCase.discipline}
-                    files={sourceFiles}
-                    packages={sourcePackages}
-                  />
+                  <details className="source-registration-help">
+                    <summary>
+                      <UiText text="자료 종류 안내" />
+                    </summary>
+                    <SourceDocumentChecklist
+                      discipline={activeCase.discipline}
+                      files={sourceFiles}
+                      packages={sourcePackages}
+                    />
+                  </details>
                 )}
                 <output
+                  hidden={uploadStatus === 'idle' && registeredCount > 0}
                   className={`source-upload-progress is-${uploadStatus}`}
                   aria-live="polite"
                   aria-busy={uploading}
                 >
-                  {uploadProgress}
+                  {uploadStatus === 'success'
+                    ? `${uploadCompletedCount}개 등록 완료`
+                    : uploadProgress}
                 </output>
                 {uploadFailures.length > 0 && (
                   <section
@@ -510,18 +553,15 @@ export function ProjectDataWorkspace({
                 >
                   <div className="source-package-history-heading">
                     <div>
-                      <span className="selection-label">
-                        <UiText text="서버 저장 내역" />
-                      </span>
                       <h5 id="source-package-history-title">
                         {' '}
-                        <UiText text="등록된 자료 묶음" />{' '}
+                        <UiText text="등록된 산출서" />{' '}
                       </h5>
                     </div>
                     {sourcePackageState === 'ready' && (
                       <span>
-                        {currentPackages.length}
-                        <UiText text="건" />
+                        {registeredCount}
+                        <UiText text="개 등록" />
                       </span>
                     )}
                   </div>
@@ -547,24 +587,33 @@ export function ProjectDataWorkspace({
                         const storedCount = sourcePackage.files.filter(
                           (file) => file.status === 'stored',
                         ).length;
+                        const uploadedCount = sourcePackage.files.filter(
+                          (file) => file.status === 'uploaded',
+                        ).length;
                         return (
                           <li key={sourcePackage.id}>
                             <div>
-                              <strong>{sourcePackage.displayName}</strong>
+                              <strong>
+                                {formatRegisteredAt(sourcePackage.createdAt)}
+                              </strong>
                               <span
                                 className={`package-status ${isPendingReplacement(sourcePackage) ? 'is-pending' : packageStatusToneClass(sourcePackage.status)}`}
                               >
                                 {isPendingReplacement(sourcePackage)
                                   ? uiText('교체 대기 · 기존 자료 유지')
-                                  : packageStatusLabel(sourcePackage.status)}
+                                  : storedCount + uploadedCount ===
+                                      sourcePackage.files.length
+                                    ? uiText('등록 완료')
+                                    : storedCount + uploadedCount > 0
+                                      ? `${storedCount + uploadedCount}/${sourcePackage.files.length}개 등록`
+                                      : packageStatusLabel(
+                                          sourcePackage.status,
+                                        )}
                               </span>
                               <small>
-                                {storedCount}/{sourcePackage.files.length}
+                                {storedCount + uploadedCount}/
+                                {sourcePackage.files.length}
                                 <UiText text="개 저장" />{' '}
-                                {uiText(' · 등록 시작 ')}
-                                {formatRegisteredAt(sourcePackage.createdAt)}
-                                {uiText(' · 묶음 ')}
-                                {sourcePackage.id.slice(0, 8)}
                               </small>
                               {isPendingReplacement(sourcePackage) &&
                                 storedCount === sourcePackage.files.length && (
@@ -600,19 +649,31 @@ export function ProjectDataWorkspace({
                               )}
                             </div>
                             <ul
+                              className="source-package-file-list"
                               aria-label={`${sourcePackage.displayName} 파일`}
                             >
                               {sourcePackage.files.map((file) => (
                                 <li key={file.sourceVersionId}>
                                   <span>{file.filename}</span>
+                                  <small>{formatBytes(file.sizeBytes)}</small>
+                                  {file.status === 'uploaded' && (
+                                    <OriginalDownload
+                                      uploadId={file.uploadId}
+                                      filename={file.filename}
+                                      sizeBytes={file.sizeBytes}
+                                    />
+                                  )}
                                   <small
                                     className={`file-status ${uploadFileStatusToneClass(file.status, file.uploadState)}`}
                                   >
-                                    {uploadFileStatusLabel(
-                                      file.status,
-                                      file.uploadState,
-                                      file.errorCode,
-                                    )}
+                                    {file.status === 'uploaded' ||
+                                    file.status === 'stored'
+                                      ? uiText('등록 완료')
+                                      : uploadFileStatusLabel(
+                                          file.status,
+                                          file.uploadState,
+                                          file.errorCode,
+                                        )}
                                   </small>
                                 </li>
                               ))}
@@ -658,25 +719,14 @@ export function ProjectDataWorkspace({
                     {' '}
                     <UiText text="취소" />{' '}
                   </button>
-                  <button
-                    className="primary-action"
-                    type="submit"
-                    disabled={
-                      uploading ||
-                      sourceFiles.length === 0 ||
-                      sourcePackageState !== 'ready'
-                    }
-                  >
-                    {uploading
-                      ? `검사·저장 중 (${uploadCompletedCount}/${sourceFiles.length})`
-                      : uploadMode === 'replace'
-                        ? uiText('원본 검사 후 교체')
-                        : uploadStatus === 'error'
-                          ? uiText('원본 검사 후 다시 저장')
-                          : uiText('원본 검사 후 저장')}
-                  </button>
                 </div>
               </form>
+            )}
+            {selectedProject && activeCase && canUpload && (
+              <DrawingAttachments
+                projectId={selectedProject.id}
+                caseId={activeCase.id}
+              />
             )}
           </div>
         </section>
@@ -778,7 +828,7 @@ function uploadFileStatusToneClass(
   status: SourcePackageSummary['files'][number]['status'],
   uploadState?: SourcePackageSummary['files'][number]['uploadState'],
 ): 'is-pending' | 'is-success' | 'is-critical' {
-  if (status === 'stored') return 'is-success';
+  if (status === 'stored' || status === 'uploaded') return 'is-success';
   if (
     status === 'rejected' ||
     status === 'deleted' ||

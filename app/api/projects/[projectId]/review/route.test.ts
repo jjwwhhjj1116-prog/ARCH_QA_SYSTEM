@@ -21,6 +21,17 @@ const identity = {
 };
 
 describe('private review report delivery', () => {
+  it('does not fall back to expensive parsing when the Drive compute binding is missing', async () => {
+    vi.stubEnv('FILE_STORAGE_PROVIDER', 'google-drive');
+    const response = await GET(
+      new Request(url, { headers: identity }),
+      context,
+    );
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('REVIEW_COMPUTE_UNAVAILABLE');
+    expect(mocks.report).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.stubEnv('LOCAL_DEMO_MODE', 'false');
     vi.stubEnv('APP_ALLOWED_EMAILS', 'authorized@example.com');
@@ -66,3 +77,4 @@ describe('private review report delivery', () => {
     expect(mocks.report).not.toHaveBeenCalled();
   });
 });
+vi.mock('cloudflare:workers', () => ({ env: {} }));

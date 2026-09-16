@@ -94,7 +94,7 @@ function matchCondition(
     ? value === target
     : value.includes(target);
 }
-function inScope(row: CanonicalRow, profile: Profile): boolean {
+export function inScope(row: CanonicalRow, profile: Profile): boolean {
   if (profile.exceptions.some((c) => matchCondition(row, c))) return false;
   return (
     !profile.conditions.length ||

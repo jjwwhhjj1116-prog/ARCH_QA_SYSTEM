@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { reviewStorage } from '@/lib/files/review-storage';
 import { z } from 'zod';
 import { getD1Binding } from '@/db';
 import type { Actor, ProjectRole } from '@/lib/domain/contracts';
@@ -23,11 +23,34 @@ import {
   suggestMapping,
   WorkbookError,
 } from './workbook';
-import { reviewRows } from './engine';
+import { inScope, reviewRows } from './engine';
 import { BaselineService, basicStatus } from './baseline-server';
 import { unpackEvidence } from './baseline';
+import { getCompanyGeminiConfig } from '@/lib/server/ai/company-settings';
+import { reviewWithGemini } from './gemini-review';
+import { applyAiProgress } from './ai-progress';
+import { regionalGeminiFetch } from '@/lib/server/ai/regional-fetch';
+import { PersonalSettingsError } from '@/lib/server/ai/personal-settings';
+import { DriveTransferService } from '@/lib/ingestion/drive-transfer-service';
+import { exportReview } from './report';
+import { AiRecoveryStore, type RecoveryRecord } from './ai-recovery';
 
 export const reviewRequestSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('resume-ai-save'),
+    caseId: z.uuid(),
+    requestKey: z.uuid(),
+  }),
+  z.object({
+    action: z.literal('save-report'),
+    caseId: z.uuid(),
+    runId: z.uuid(),
+  }),
+  z.object({
+    action: z.literal('prepare-source'),
+    caseId: z.uuid(),
+    uploadId: z.uuid(),
+  }),
   z.object({
     action: z.literal('start-basic'),
     caseId: z.uuid(),
@@ -65,6 +88,9 @@ export const reviewRequestSchema = z.discriminatedUnion('action', [
     caseId: z.uuid(),
     profileId: z.uuid(),
     trial: z.boolean(),
+    includeAi: z.boolean().optional(),
+    parentRunId: z.uuid().optional(),
+    requestKey: z.uuid().optional(),
   }),
   z.object({
     action: z.literal('decision'),
@@ -86,6 +112,10 @@ const sha = async (bytes: ArrayBuffer) =>
   hex(await crypto.subtle.digest('SHA-256', bytes));
 export class ReviewService {
   private db = getD1Binding();
+  constructor(
+    private recovery?: AiRecoveryStore,
+    private aiFetcher: typeof fetch = regionalGeminiFetch,
+  ) {}
   async authorize(
     actor: Actor,
     projectId: string,
@@ -206,6 +236,7 @@ export class ReviewService {
       .first<Parameters<typeof basicStatus>[0]>();
     return {
       sources,
+      pendingAiSaves: (await this.recovery?.pending(actor.id, caseId)) ?? [],
       canManageGuidelines: admin,
       pendingJob: pending ? basicStatus(pending) : null,
       mappingVersionId: mapping?.id ?? null,
@@ -367,7 +398,7 @@ export class ReviewService {
           .first<{ object_key: string; sha256: string }>();
     const record =
       legacyRecord ?? (basicRecord ? { ...basicRecord, trial: 0 } : null);
-    if (!record || !env.FILES)
+    if (!record)
       fail(404, 'RUN_NOT_FOUND', '저장된 검수 실행을 찾지 못했습니다.');
     if (record.trial && !isApplicationAdmin(actor.email))
       fail(
@@ -375,7 +406,7 @@ export class ReviewService {
         'RULE_ADMIN_REQUIRED',
         '지침 시험 결과는 관리자만 확인할 수 있습니다.',
       );
-    const object = await env.FILES.get(record.object_key);
+    const object = await reviewStorage().get(record.object_key);
     if (!object || object.size > 24 * 1024 * 1024)
       fail(409, 'RUN_UNAVAILABLE', '검수 근거 파일을 읽을 수 없습니다.');
     const bytes = await object.arrayBuffer();
@@ -431,6 +462,145 @@ export class ReviewService {
         input.action === 'profile' ||
         (input.action === 'run' && input.trial),
     );
+    if (input.action === 'resume-ai-save') {
+      if (!this.recovery)
+        fail(
+          503,
+          'AI_RECOVERY_UNAVAILABLE',
+          'AI 복구 저장소가 연결되지 않았습니다.',
+        );
+      const record = await this.recovery.get(
+        actor.id,
+        caseId,
+        input.requestKey,
+      );
+      if (!record || record.projectId !== projectId)
+        fail(
+          404,
+          'AI_RECOVERY_NOT_FOUND',
+          '이 계정의 AI 복구 요청을 찾지 못했습니다.',
+        );
+      if (record.state === 'completed')
+        return this.runDetail(actor, projectId, caseId, record.runId);
+      const run = await this.recovery.read(record);
+      await this.persistRun(actor, run, requestId);
+      await this.recovery.complete(record);
+      return this.runDetail(actor, projectId, caseId, run.id);
+    }
+    if (input.action === 'run' && input.includeAi) {
+      if (
+        !this.recovery &&
+        process.env.FILE_STORAGE_PROVIDER === 'google-drive'
+      )
+        fail(
+          503,
+          'AI_RECOVERY_UNAVAILABLE',
+          'AI 결과 복구 저장소가 연결되지 않았습니다. AI를 호출하지 않았습니다.',
+        );
+      const previous = input.requestKey
+        ? await this.recovery?.get(actor.id, caseId, input.requestKey)
+        : undefined;
+      if (previous) {
+        if (
+          previous.projectId !== projectId ||
+          previous.fingerprint !== JSON.stringify(input)
+        )
+          fail(
+            409,
+            'AI_REQUEST_CONFLICT',
+            '동일 AI 요청 ID에 다른 입력을 사용할 수 없습니다.',
+          );
+        if (previous.state === 'completed')
+          return this.runDetail(actor, projectId, caseId, previous.runId);
+        fail(
+          409,
+          previous.state === 'ready'
+            ? 'AI_RESULT_SAVE_PENDING'
+            : 'AI_RESULT_UNCERTAIN',
+          previous.state === 'ready'
+            ? 'AI 결과가 보관되어 있습니다. AI 재실행 없이 결과 저장을 복구해 주세요.'
+            : '이미 접수된 AI 요청입니다. 응답 저장 여부를 확인할 수 없어 자동 재호출하지 않습니다.',
+        );
+      }
+    }
+    if (input.action === 'prepare-source') {
+      const scoped = await this.db
+        .prepare(
+          'SELECT id FROM upload_attempt WHERE id=? AND project_id=? AND review_case_id=?',
+        )
+        .bind(input.uploadId, projectId, caseId)
+        .first();
+      if (!scoped)
+        fail(403, 'PROJECT_ACCESS_DENIED', '이 프로젝트의 원본이 아닙니다.');
+      return new DriveTransferService(
+        this.db,
+        process.env.AI_SETTINGS_ENCRYPTION_KEY,
+      ).prepare(input.uploadId, actor, requestId);
+    }
+    if (input.action === 'save-report') {
+      const { run, decisions } = await this.runDetail(
+        actor,
+        projectId,
+        caseId,
+        input.runId,
+      );
+      const bytes = new Uint8Array(exportReview(run, decisions));
+      const digest = await sha(bytes.buffer);
+      const objectKey = `projects/${projectId}/cases/${caseId}/reviews/${run.id}/report-${digest}.xlsx`;
+      await this.authorize(actor, projectId, caseId, true, run.trial);
+      await reviewStorage().put(objectKey, bytes, {
+        httpMetadata: {
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+        customMetadata: { projectId, caseId, sha256: digest },
+      });
+      await this.authorize(actor, projectId, caseId, true, run.trial);
+      const audit = await this.db
+        .prepare(
+          `INSERT INTO audit_event(id,project_id,actor_id,action,target_type,target_id,payload_json,request_id,created_at)
+         SELECT ?,?,?,'review.report.saved','qc_review',?,?,?,?
+         WHERE EXISTS(SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id
+           WHERE pm.user_id=? AND p.id=? AND p.status='active' AND rc.id=? AND rc.status<>'archived'
+           AND pm.role IN ('workspace_admin','project_owner','reviewer','approver')
+           AND NOT EXISTS(SELECT 1 FROM employee_account e WHERE e.id=pm.user_id AND e.active=0))`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          projectId,
+          actor.id,
+          run.id,
+          JSON.stringify({
+            caseId,
+            objectKey,
+            sha256: digest,
+            size: bytes.byteLength,
+            decisionCount: decisions.length,
+            trial: run.trial,
+          }),
+          crypto.randomUUID(),
+          Date.now(),
+          actor.id,
+          projectId,
+          caseId,
+        )
+        .run();
+      if (audit.meta.changes !== 1)
+        fail(
+          403,
+          'QC_PERMISSION_CHANGED',
+          '저장 중 권한이 변경되었습니다. 프로젝트 접근 권한을 확인해 주세요.',
+        );
+      return {
+        runId: run.id,
+        objectKey,
+        sha256: digest,
+        size: bytes.byteLength,
+        saved: true,
+        format: 'xlsx',
+        decisionCount: decisions.length,
+      };
+    }
     if (
       ['mapping', 'profile', 'run', 'start-basic', 'continue-basic'].includes(
         input.action,
@@ -552,6 +722,19 @@ export class ReviewService {
         caseId,
         input.trialRunId,
       );
+      const untestedAi = trialResult.profile.instructions?.some(
+        (i) =>
+          i.enabled &&
+          !trialResult.coverage.some(
+            (c) => c.ruleId === `AI-${i.id}` && c.evaluated > 0,
+          ),
+      );
+      if (untestedAi)
+        fail(
+          409,
+          'AI_TRIAL_REQUIRED',
+          '활성 AI 지침마다 AI 시험 평가가 필요합니다. AI 지침 적용을 켜고 시험하거나 해당 지침을 비활성화하여 새 버전을 저장하세요.',
+        );
       if (!trialResult.coverage.some((c) => c.evaluated > 0))
         fail(
           409,
@@ -627,6 +810,16 @@ export class ReviewService {
         'PROFILE_NOT_APPROVED',
         '시험 실행과 지침 승인 후 정식 검수가 가능합니다.',
       );
+    if (
+      input.includeAi &&
+      (!input.requestKey ||
+        !profile.profile.instructions?.some((i) => i.enabled))
+    )
+      fail(
+        400,
+        'AI_INSTRUCTIONS_REQUIRED',
+        '저장된 활성 AI 지침과 실행 요청 ID가 필요합니다.',
+      );
     const mappings = state.mappings.filter((m) => m.confirmed);
     if (!mappings.length)
       fail(
@@ -638,6 +831,31 @@ export class ReviewService {
     let evidenceBytes = 0;
     const refs: Run['sources'] = [];
     const limitations: string[] = [];
+    const packages = await new D1SourcePackageRepository().listForActor(
+      projectId,
+      caseId,
+      actor.id,
+    );
+    const registered = packages
+      .filter((p) => !p.supersededBy)
+      .flatMap((p) => p.files);
+    const sourceAudit: NonNullable<Run['sourceAudit']> = {
+      registeredFiles: registered.length,
+      inspectedFiles: 0,
+      totalSheets: 0,
+      mappedSheets: 0,
+      issues: [],
+    };
+    for (const file of registered) {
+      if (
+        !state.sources.some((s) => s.sourceVersionId === file.sourceVersionId)
+      )
+        sourceAudit.issues.push(
+          `${file.filename}: 등록 원본의 저장·검수 준비 미완료`,
+        );
+    }
+    if (registered.length !== state.sources.length)
+      sourceAudit.issues.push('등록 목록과 검수 원본 목록의 파일 수 불일치');
     const seenHashes = new Set<string>();
     for (const source of state.sources) {
       const selected = mappings.filter(
@@ -645,11 +863,22 @@ export class ReviewService {
       );
       if (!selected.length) {
         limitations.push(`${source.filename}: 시트·열 매핑 미확인`);
-        continue;
+        sourceAudit.issues.push(`${source.filename}: 시트·열 매핑 미확인`);
       }
       try {
         const parsed = await this.readSource(projectId, caseId, source);
+        sourceAudit.inspectedFiles++;
+        sourceAudit.totalSheets += parsed.sheets.length;
+        for (const sheet of parsed.sheets) {
+          if (!selected.some((m) => m.sheet === sheet.name))
+            sourceAudit.issues.push(
+              `${source.filename}/${sheet.name}: 미매핑 시트`,
+            );
+        }
         if (seenHashes.has(parsed.sha256)) {
+          sourceAudit.issues.push(
+            `${source.filename}: 동일 해시 중복 제외 · 범위 확인 필요`,
+          );
           limitations.push(
             `${source.filename}: 동일 해시 파일의 중복 표본 제외`,
           );
@@ -660,6 +889,9 @@ export class ReviewService {
           const sheet = parsed.sheets.find((s) => s.name === mapping.sheet);
           if (!sheet) {
             limitations.push(`${source.filename}/${mapping.sheet}: 시트 없음`);
+            sourceAudit.issues.push(
+              `${source.filename}/${mapping.sheet}: 시트 없음`,
+            );
             continue;
           }
           const ref = {
@@ -671,6 +903,7 @@ export class ReviewService {
             cell: 'A' + mapping.headerRow,
           };
           refs.push(ref);
+          sourceAudit.mappedSheets++;
           for (const row of canonicalRows(sheet, mapping, ref)) {
             evidenceBytes += new TextEncoder().encode(
               JSON.stringify(row),
@@ -691,9 +924,10 @@ export class ReviewService {
             );
         }
       } catch (error) {
-        if (error instanceof WorkbookError)
+        if (error instanceof WorkbookError) {
           limitations.push(`${source.filename}: ${error.message}`);
-        else throw error;
+          sourceAudit.issues.push(`${source.filename}: 원본 읽기 실패`);
+        } else throw error;
       }
     }
     if (!rows.length)
@@ -716,9 +950,210 @@ export class ReviewService {
       mappings,
       rows,
       sources: refs,
+      sourceAudit,
       ...result,
       limitations: [...limitations, ...result.limitations],
     };
+    const instructions =
+      profile.profile.instructions?.filter((i) => i.enabled) ?? [];
+    let parent: Run | undefined;
+    if (input.parentRunId) {
+      parent = (
+        await this.runDetail(actor, projectId, caseId, input.parentRunId)
+      ).run;
+      if (
+        !input.includeAi ||
+        !parent.aiChecks ||
+        !parent.ai ||
+        parent.profileId !== run.profileId ||
+        parent.trial !== run.trial ||
+        JSON.stringify(parent.rows) !== JSON.stringify(run.rows) ||
+        JSON.stringify(parent.mappings) !== JSON.stringify(run.mappings) ||
+        JSON.stringify(parent.profile) !== JSON.stringify(run.profile)
+      )
+        fail(
+          409,
+          'AI_CONTINUATION_CHANGED',
+          '원본·매핑·지침 또는 실행 범위가 바뀌어 이어갈 수 없습니다. 새 검수가 필요합니다.',
+        );
+      if (
+        !parent.sourceAudit ||
+        !run.sourceAudit ||
+        parent.sourceAudit.registeredFiles !==
+          run.sourceAudit.registeredFiles ||
+        parent.sourceAudit.totalSheets !== run.sourceAudit.totalSheets ||
+        JSON.stringify(parent.sources) !== JSON.stringify(run.sources)
+      )
+        fail(
+          409,
+          'AI_CONTINUATION_CHANGED',
+          '등록 파일·시트 목록이 바뀌었습니다. 새 전체 검수가 필요합니다.',
+        );
+      if (!parent.aiChecks.some((c) => c.status === 'pending'))
+        fail(
+          409,
+          'AI_NO_PENDING_ROWS',
+          '미전송 대상이 없습니다. 실패·판단불가 항목은 별도 확인이 필요합니다.',
+        );
+    }
+    let recoveryRecord: RecoveryRecord | undefined;
+    if (input.includeAi) {
+      // Only a project-authorized command can use the company key. D1 claims
+      // prevent duplicate paid requests; history remains accessible after a lost response.
+      const config = await getCompanyGeminiConfig(
+        this.db,
+        process.env.AI_SETTINGS_ENCRYPTION_KEY,
+      ).catch((error: unknown) => {
+        if (error instanceof PersonalSettingsError)
+          fail(error.status, error.code, error.message);
+        throw error;
+      });
+      const now = Date.now();
+      if (parent) {
+        if (
+          parent.ai?.settingsVersion !== config.version ||
+          parent.ai.model !== config.model
+        )
+          fail(
+            409,
+            'AI_CONTINUATION_CHANGED',
+            '회사 키·모델 설정이 바뀌었습니다. 기존 실행과 합치지 않습니다.',
+          );
+      }
+      const claim = await this.db
+        .prepare(
+          'INSERT OR IGNORE INTO auth_attempt(bucket,attempts,expires_at) VALUES (?,1,?) RETURNING attempts',
+        )
+        .bind(`ai-request:${actor.id}:${input.requestKey}`, now + 24 * 3600_000)
+        .first();
+      if (!claim)
+        fail(
+          409,
+          'AI_REQUEST_ALREADY_STARTED',
+          '이미 접수된 AI 요청입니다. 실행 이력을 확인하세요. 자동 재과금하지 않습니다.',
+        );
+      const counter = await this.db
+        .prepare(
+          'INSERT INTO auth_attempt(bucket,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(bucket) DO UPDATE SET attempts=CASE WHEN expires_at<=? THEN 1 ELSE attempts+1 END,expires_at=CASE WHEN expires_at<=? THEN ? ELSE expires_at END RETURNING attempts',
+        )
+        .bind(
+          'qc-company-ai-budget',
+          now + 15 * 60_000,
+          now,
+          now,
+          now + 15 * 60_000,
+        )
+        .first<{ attempts: number }>();
+      if (!counter || counter.attempts > 10)
+        fail(
+          429,
+          'AI_RATE_LIMIT',
+          '회사 AI 검수는 15분에 최대 10회입니다. 잠시 뒤 다시 시도하세요.',
+        );
+      await this.authorize(actor, projectId, caseId, true, input.trial);
+      if (parent) {
+        const continuation = await this.db
+          .prepare(
+            'INSERT OR IGNORE INTO auth_attempt(bucket,attempts,expires_at) VALUES (?,1,?) RETURNING attempts',
+          )
+          .bind(`ai-continuation:${parent.id}`, now + 24 * 3600_000)
+          .first();
+        if (!continuation)
+          fail(
+            409,
+            'AI_CONTINUATION_STARTED',
+            '이 묶음의 다음 실행이 이미 접수됐습니다. 실행 이력·저장 복구를 확인하세요.',
+          );
+      }
+      if (this.recovery) {
+        recoveryRecord = {
+          actorId: actor.id,
+          projectId,
+          caseId,
+          requestKey: input.requestKey!,
+          runId: id,
+          fingerprint: JSON.stringify(input),
+          state: 'claimed',
+        };
+        try {
+          await this.recovery.claim(recoveryRecord);
+        } catch (error) {
+          // No Google call has happened yet; release only this owned continuation.
+          if (parent)
+            await this.db
+              .prepare('DELETE FROM auth_attempt WHERE bucket=?')
+              .bind(`ai-continuation:${parent.id}`)
+              .run();
+          throw error;
+        }
+      }
+      const pendingRowIds = parent
+        ? new Set(
+            parent
+              .aiChecks!.filter((c) => c.status === 'pending')
+              .map((c) => c.rowId),
+          )
+        : null;
+      const aiResult = await reviewWithGemini({
+        fetcher: this.aiFetcher,
+        apiKey: config.apiKey,
+        model: config.model,
+        contextRows: rows.map((row) =>
+          inScope(row, profile.profile)
+            ? row
+            : { ...row, excluded: '지침 대상 조건 또는 예외에 따라 제외' },
+        ),
+        rows: rows
+          .filter((row) => !pendingRowIds || pendingRowIds.has(row.id))
+          .map((row) =>
+            inScope(row, profile.profile)
+              ? row
+              : { ...row, excluded: '지침 대상 조건 또는 예외에 따라 제외' },
+          ),
+        instructions,
+      });
+      run.ai = { ...aiResult.ai, settingsVersion: config.version };
+      run.findings.push(...aiResult.findings);
+      run.coverage.push(...aiResult.coverage);
+      run.limitations.push(...aiResult.limitations);
+      applyAiProgress(run, aiResult, parent);
+    } else if (instructions.length) {
+      run.limitations.push(
+        '이번 실행은 외부 AI 미사용입니다. 자연어 AI 지침은 검사하지 않았습니다.',
+      );
+      run.coverage.push(
+        ...instructions.map((i) => ({
+          ruleId: `AI-${i.id}`,
+          label: i.text,
+          evaluated: 0,
+          unevaluated: rows.length,
+          reasons: ['외부 AI 미사용 실행'],
+        })),
+      );
+    }
+    if (recoveryRecord && this.recovery)
+      await this.recovery.checkpoint(recoveryRecord, run);
+    try {
+      await this.persistRun(actor, run, requestId);
+      if (recoveryRecord && this.recovery)
+        await this.recovery.complete(recoveryRecord);
+    } catch (error) {
+      if (
+        recoveryRecord &&
+        !(error instanceof RequestBoundaryError && error.status === 403)
+      )
+        fail(
+          503,
+          'AI_RESULT_SAVE_PENDING',
+          'AI 결과는 복구 저장소에 보관되어 있습니다. AI 재호출 없이 결과 저장을 다시 진행해 주세요.',
+        );
+      throw error;
+    }
+    return { run, decisions: [] };
+  }
+  private async persistRun(actor: Actor, run: Run, requestId: string) {
+    const { projectId, caseId, id } = run;
+    await this.authorize(actor, projectId, caseId, true, run.trial);
     const bytes = new TextEncoder().encode(JSON.stringify(run));
     if (bytes.byteLength > 24 * 1024 * 1024)
       fail(
@@ -726,43 +1161,87 @@ export class ReviewService {
         'REVIEW_EVIDENCE_LIMIT',
         '검수 근거 저장 한도를 넘었습니다. 자료를 나눠 주세요.',
       );
-    if (!env.FILES)
-      fail(
-        503,
-        'REVIEW_STORAGE_UNAVAILABLE',
-        '검수 근거 저장소가 연결되지 않았습니다.',
-      );
     const objectKey = `projects/${projectId}/cases/${caseId}/reviews/${id}.json`;
     const digest = await sha(bytes.buffer);
-    await env.FILES.put(objectKey, bytes, {
+    const existing = await this.db
+      .prepare(
+        'SELECT sha256 FROM qc_review_run WHERE id=? AND project_id=? AND case_id=?',
+      )
+      .bind(id, projectId, caseId)
+      .first<{ sha256: string }>();
+    if (existing) {
+      if (existing.sha256 !== digest)
+        fail(
+          409,
+          'AI_RECOVERY_INTEGRITY',
+          '이미 저장된 실행의 해시가 다릅니다.',
+        );
+      return;
+    }
+    await reviewStorage().put(objectKey, bytes, {
       httpMetadata: { contentType: 'application/json' },
       customMetadata: { projectId, caseId, sha256: digest },
     });
-    await this.write(
-      actor,
-      projectId,
-      caseId,
-      id,
-      'review.run.completed',
-      this.db
-        .prepare('INSERT INTO qc_review_run VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-        .bind(
-          id,
-          projectId,
-          caseId,
-          profile.id,
-          profile.version,
-          input.trial ? 1 : 0,
-          objectKey,
-          digest,
-          run.findings.length,
-          rows.length,
-          actor.id,
-          createdAt,
-        ),
-      requestId,
-      input.trial,
-    );
-    return { run, decisions: [] };
+    await this.authorize(actor, projectId, caseId, true, run.trial);
+    const auditId = crypto.randomUUID();
+    try {
+      const committed = await this.db.batch([
+        this.db
+          .prepare(`INSERT INTO audit_event(id,project_id,actor_id,action,target_type,target_id,payload_json,request_id,created_at)
+        SELECT ?,?,?,'review.run.completed','qc_review',?,?,?,?
+        WHERE EXISTS(SELECT 1 FROM project_member pm JOIN project p ON p.id=pm.project_id JOIN review_case rc ON rc.project_id=p.id JOIN user_profile u ON u.id=pm.user_id
+          WHERE pm.user_id=? AND p.id=? AND p.status='active' AND rc.id=? AND rc.status<>'archived' AND rc.discipline='FIN'
+          AND pm.role IN ('workspace_admin','project_owner','reviewer')
+          AND NOT EXISTS(SELECT 1 FROM employee_account e WHERE e.id=pm.user_id AND e.active=0)
+          AND (?=0 OR lower(u.email) IN ('yjw@con-cost.com','yjpark@con-cost.com')))`)
+          .bind(
+            auditId,
+            projectId,
+            actor.id,
+            id,
+            JSON.stringify({ caseId }),
+            requestId,
+            Date.now(),
+            actor.id,
+            projectId,
+            caseId,
+            run.trial ? 1 : 0,
+          ),
+        this.db
+          .prepare(
+            'INSERT INTO qc_review_run SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM audit_event WHERE id=?)',
+          )
+          .bind(
+            id,
+            projectId,
+            caseId,
+            run.profileId,
+            run.profileVersion,
+            run.trial ? 1 : 0,
+            objectKey,
+            digest,
+            run.findings.length,
+            run.rows.length,
+            run.actorId,
+            run.createdAt,
+            auditId,
+          ),
+      ]);
+      if (committed.some((entry) => entry.meta.changes !== 1))
+        fail(
+          403,
+          'QC_PERMISSION_CHANGED',
+          '저장 중 검수 권한이 변경되었습니다.',
+        );
+    } catch (error) {
+      const committed = await this.db
+        .prepare(
+          'SELECT sha256 FROM qc_review_run WHERE id=? AND project_id=? AND case_id=?',
+        )
+        .bind(id, projectId, caseId)
+        .first<{ sha256: string }>();
+      if (committed?.sha256 !== digest) throw error;
+      await this.authorize(actor, projectId, caseId, true, run.trial);
+    }
   }
 }

@@ -10,7 +10,9 @@ const rosterSchema = z
       name: z.string().min(1).max(120),
       passwordHash: z
         .string()
-        .regex(/^pbkdf2-sha256\$600000\$[a-f0-9]{32}\$[a-f0-9]{64}$/),
+        .regex(
+          /^(?:pbkdf2-sha256\$600000|scrypt\$16384\$8\$5)\$[a-f0-9]{32}\$[a-f0-9]{64}$/,
+        ),
     }),
   )
   .min(1)

@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { reviewStorage } from '@/lib/files/review-storage';
 import { getD1Binding } from '@/db';
 import type { Actor } from '@/lib/domain/contracts';
 import { RequestBoundaryError } from '@/lib/http/request-boundary';
@@ -231,7 +231,7 @@ export class BaselineService {
       let totalBytes = 0;
       for (const part of parts)
         if (part.key && part.sha) {
-          const object = await env.FILES?.get(part.key);
+          const object = await reviewStorage().get(part.key);
           if (!object || (totalBytes += object.size) > 16 * 1024 * 1024)
             throw new ReviewLimitError(
               '기본검사 근거 총량 16MB 한도를 넘었거나 저장된 근거를 읽지 못했습니다. 완료로 처리하지 않습니다.',
@@ -399,12 +399,6 @@ export class BaselineService {
     suffix: string,
     value: unknown,
   ) {
-    if (!env.FILES)
-      fail(
-        503,
-        'REVIEW_STORAGE_UNAVAILABLE',
-        '검수 근거 저장소가 연결되지 않았습니다.',
-      );
     const text = JSON.stringify(value);
     if (new TextEncoder().encode(text).byteLength > 12 * 1024 * 1024)
       throw new ReviewLimitError(
@@ -412,7 +406,7 @@ export class BaselineService {
       );
     const key = `projects/${projectId}/cases/${caseId}/basic/${id}/${suffix}.json`;
     const sha = await tokenHash(text);
-    await env.FILES.put(key, text, {
+    await reviewStorage().put(key, text, {
       httpMetadata: { contentType: 'application/json' },
       customMetadata: { projectId, caseId, sha256: sha },
     });

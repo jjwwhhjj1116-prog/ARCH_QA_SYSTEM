@@ -68,6 +68,8 @@ beforeEach(() => {
     INSERT INTO review_case VALUES ('${caseId}','${projectId}','FIN','FIN','draft','owner',NULL,NULL,1);`);
   // Upgrade an existing database, not just an empty schema.
   db.exec(readFileSync('drizzle/0004_source_package_replacement.sql', 'utf8'));
+  db.exec(readFileSync('drizzle/0010_aspiring_rockslide.sql', 'utf8'));
+  db.exec(readFileSync('drizzle/0011_drive_upload.sql', 'utf8'));
   mock.binding = {
     prepare: (sql: string) => new Statement(sql),
     batch: async (statements: Statement[]) => {
@@ -145,6 +147,64 @@ async function apply(id: string) {
 }
 
 describe('source replacement with real SQLite transactions', () => {
+  it.each(['project', 'case'])(
+    'explains archived %s without creating or changing records',
+    async (target) => {
+      const existing = await create();
+      db.exec(
+        `UPDATE ${target === 'project' ? 'project' : 'review_case'} SET status='archived'`,
+      );
+      const guidance =
+        target === 'project' ? '보관된 프로젝트' : '보관된 자료 기록';
+      await expect(create()).rejects.toThrow(guidance);
+      await expect(list()).rejects.toThrow(guidance);
+      expect(
+        db.prepare('SELECT COUNT(*) AS n FROM source_package').get()?.n,
+      ).toBe(1);
+      expect(
+        db
+          .prepare('SELECT status FROM source_package WHERE id=?')
+          .get(existing.id)?.status,
+      ).toBe('receiving');
+    },
+  );
+
+  it('does not disclose archived state to nonmembers or mismatched cases', async () => {
+    db.exec("UPDATE project SET status='archived'");
+    await expect(
+      repository.listForActor(projectId, caseId, 'outsider'),
+    ).rejects.toThrow('권한');
+    await expect(
+      repository.listForActor(projectId, crypto.randomUUID(), actor.id),
+    ).rejects.toThrow('권한');
+    db.exec('DELETE FROM project_member');
+    await expect(create()).rejects.toThrow('권한');
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM source_package').get()?.n,
+    ).toBe(0);
+  });
+
+  it.each(['viewer', 'approver'])(
+    'allows %s listing but denies registration',
+    async (role) => {
+      db.prepare('UPDATE project_member SET role=?').run(role);
+      await expect(list()).resolves.toEqual([]);
+      await expect(create()).rejects.toThrow('권한');
+      expect(
+        db.prepare('SELECT COUNT(*) AS n FROM source_package').get()?.n,
+      ).toBe(0);
+    },
+  );
+
+  it.each(['project_owner', 'workspace_admin', 'reviewer'])(
+    'retains active %s registration',
+    async (role) => {
+      db.prepare('UPDATE project_member SET role=?').run(role);
+      const result = await create();
+      expect((await list()).map((item) => item.id)).toEqual([result.id]);
+    },
+  );
+
   it('activates all new files once and keeps immutable originals as superseded history', async () => {
     const old = await create();
     store(old.id);

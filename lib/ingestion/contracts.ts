@@ -42,6 +42,7 @@ export type CreateSourcePackageInput = z.infer<
 >;
 
 export type SourceUploadIntentSummary = {
+  transferMode?: 'resumable';
   uploadId: string;
   sourceFileId: string;
   sourceVersionId: string;

@@ -75,6 +75,12 @@ const conditionSchema = z.object({
   operator: z.enum(['equals', 'contains']),
   value: z.string().min(1).max(120),
 });
+export const aiInstructionSchema = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+  text: z.string().trim().min(1).max(1000),
+  enabled: z.boolean(),
+});
+export type AiInstruction = z.infer<typeof aiInstructionSchema>;
 export const profileSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -93,10 +99,17 @@ export const profileSchema = z
     match: z.enum(['all', 'any']),
     conditions: z.array(conditionSchema).max(8),
     exceptions: z.array(conditionSchema).max(8),
+    instructions: z.array(aiInstructionSchema).max(10).optional(),
   })
   .refine((p) => p.rangeMin <= p.rangeMax, {
     message: '최솟값은 최댓값 이하여야 합니다.',
-  });
+  })
+  .refine(
+    (p) =>
+      new Set(p.instructions?.map((i) => i.id)).size ===
+      (p.instructions?.length ?? 0),
+    { message: 'AI 지침 ID는 중복될 수 없습니다.' },
+  );
 export type Profile = z.infer<typeof profileSchema>;
 export const defaultProfile: Profile = {
   name: 'FIN 기본 검토 지침',
@@ -159,6 +172,29 @@ export type RuleCoverage = {
   reasons: string[];
 };
 export type Run = {
+  parentRunId?: string;
+  aiChecks?: AiCheck[];
+  sourceAudit?: {
+    registeredFiles: number;
+    inspectedFiles: number;
+    totalSheets: number;
+    mappedSheets: number;
+    issues: string[];
+  };
+  ai?: {
+    provider: 'google-gemini';
+    model: string;
+    promptVersion: string;
+    contextComplete?: boolean;
+    inputHash: string;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    costUsd: null;
+    state: 'completed' | 'partial' | 'failed';
+    evaluatedRows: number;
+    totalRows: number;
+    settingsVersion?: number;
+  };
   kind?: 'baseline';
   rowCount?: number;
   id: string;
@@ -177,6 +213,18 @@ export type Run = {
   coverage: RuleCoverage[];
   limitations: string[];
   sources: SourceRef[];
+};
+export type AiCheck = {
+  rowId: string;
+  instructionId: string;
+  status:
+    | 'pending'
+    | 'suspected'
+    | 'not_flagged'
+    | 'unable'
+    | 'excluded'
+    | 'failed';
+  reason: string;
 };
 export type ProfileVersion = {
   id: string;
@@ -206,6 +254,11 @@ export type ReviewSource = {
   packageId: string;
 };
 export type ReviewState = {
+  pendingAiSaves?: Array<{
+    requestKey: string;
+    runId: string;
+    state: 'claimed' | 'ready';
+  }>;
   canManageGuidelines?: boolean;
   pendingJob?: BasicJobStatus | null;
   mappingVersionId: string | null;

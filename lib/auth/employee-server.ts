@@ -1,7 +1,12 @@
 import { getD1Binding } from '@/db';
 import type { Actor } from '@/lib/domain/contracts';
 import { AuthenticationError } from './request-actor';
-import { randomSessionToken, tokenHash, verifyPassword } from './password';
+import {
+  hashPassword,
+  randomSessionToken,
+  tokenHash,
+  verifyPassword,
+} from './password';
 import { provisionConfiguredRoster } from './roster';
 
 export const employeeLoginEnabled = () =>
@@ -101,7 +106,7 @@ export async function loginEmployee(
       active: number;
     }>();
   const dummy =
-    'pbkdf2-sha256$600000$00000000000000000000000000000000$' + '0'.repeat(64);
+    'scrypt$16384$8$5$00000000000000000000000000000000$' + '0'.repeat(64);
   const matches = await verifyPassword(
     password,
     account?.password_hash ?? dummy,
@@ -163,4 +168,103 @@ export async function logoutEmployee(headers: Headers) {
       .prepare('DELETE FROM employee_session WHERE token_hash=?')
       .bind(await tokenHash(token))
       .run();
+}
+
+export async function changeEmployeePassword(
+  currentPassword: string,
+  newPassword: string,
+  request: Request,
+  requestId: string,
+) {
+  const actor = await employeeActor(request.headers);
+  const db = getD1Binding();
+  const now = Date.now();
+  const bucket = await tokenHash(`password-change:${actor.id}`);
+  const count = await db
+    .prepare(
+      `INSERT INTO auth_attempt(bucket,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(bucket) DO UPDATE SET attempts=CASE WHEN expires_at<=? THEN 1 ELSE attempts+1 END, expires_at=CASE WHEN expires_at<=? THEN ? ELSE expires_at END RETURNING attempts`,
+    )
+    .bind(bucket, now + 15 * 60_000, now, now, now + 15 * 60_000)
+    .first<{ attempts: number }>();
+  if (!count || count.attempts > 5)
+    throw new AuthenticationError(
+      '비밀번호 변경 시도가 많습니다. 15분 뒤 다시 시도해 주세요.',
+      'PASSWORD_CHANGE_RATE_LIMIT',
+      429,
+    );
+  if (
+    !currentPassword ||
+    currentPassword.length > 256 ||
+    newPassword.length < 12 ||
+    newPassword.length > 128
+  )
+    throw new AuthenticationError(
+      '현재 비밀번호와 12~128자의 새 비밀번호를 입력해 주세요.',
+      'INVALID_PASSWORD_INPUT',
+      400,
+    );
+  const account = await db
+    .prepare(
+      'SELECT password_hash,credential_version FROM employee_account WHERE id=? AND active=1',
+    )
+    .bind(actor.id)
+    .first<{ password_hash: string; credential_version: number }>();
+  if (!account)
+    throw new AuthenticationError(
+      '계정 상태가 변경되었습니다. 다시 로그인해 주세요.',
+    );
+  if (!(await verifyPassword(currentPassword, account.password_hash))) {
+    await db
+      .prepare('INSERT INTO auth_event VALUES (?,?,?,?,?)')
+      .bind(
+        crypto.randomUUID(),
+        actor.id,
+        'password_change_failed',
+        requestId,
+        now,
+      )
+      .run();
+    throw new AuthenticationError(
+      '현재 비밀번호가 맞지 않습니다.',
+      'CURRENT_PASSWORD_INVALID',
+      400,
+    );
+  }
+  if (newPassword === currentPassword)
+    throw new AuthenticationError(
+      '기존 비밀번호와 다른 새 비밀번호를 입력해 주세요.',
+      'PASSWORD_UNCHANGED',
+      400,
+    );
+  const hash = await hashPassword(newPassword);
+  const token = readToken(request.headers)!;
+  // The guarded write and its audit commit together. A concurrent logout,
+  // password change or account deactivation cannot reuse this authorization.
+  const result = await db.batch([
+    db
+      .prepare(
+        `UPDATE employee_account SET password_hash=?,credential_version=credential_version+1 WHERE id=? AND active=1 AND credential_version=? AND password_hash=? AND EXISTS (SELECT 1 FROM employee_session WHERE token_hash=? AND account_id=? AND credential_version=? AND expires_at>?)`,
+      )
+      .bind(
+        hash,
+        actor.id,
+        account.credential_version,
+        account.password_hash,
+        await tokenHash(token),
+        actor.id,
+        account.credential_version,
+        Date.now(),
+      ),
+    db
+      .prepare('INSERT INTO auth_event SELECT ?,?,?,?,? WHERE changes()=1')
+      .bind(crypto.randomUUID(), actor.id, 'password_changed', requestId, now),
+  ]);
+  if (result[0]?.meta.changes !== 1)
+    throw new AuthenticationError(
+      '계정 상태가 변경되었습니다. 다시 로그인한 뒤 시도해 주세요.',
+      'PASSWORD_CHANGE_CONFLICT',
+      409,
+    );
+  // employeeActor joins credential_version on every request, invalidating all
+  // prior sessions without touching identities, roles or project memberships.
 }

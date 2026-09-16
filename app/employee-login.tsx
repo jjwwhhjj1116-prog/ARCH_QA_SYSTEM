@@ -182,6 +182,25 @@ function LoginForm() {
               ? 'Chỉ tài khoản được cấp quyền mới có thể truy cập dữ liệu.'
               : '승인된 직원 계정만 내부 자료에 접근할 수 있습니다.'}
           </small>
+          <p className="login-help">
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              title={vi ? 'Mở trong tab mới' : '새 탭에서 열기'}
+            >
+              {vi ? 'Chính sách quyền riêng tư' : '개인정보처리방침'}
+            </a>
+            {' · '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              title={vi ? 'Mở trong tab mới' : '새 탭에서 열기'}
+            >
+              {vi ? 'Điều khoản sử dụng' : '이용약관'}
+            </a>
+          </p>
         </section>
       </div>
     </main>

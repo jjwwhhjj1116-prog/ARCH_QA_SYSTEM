@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { GEMINI_MODELS, testGeminiConnection } from './gemini-config';
+import {
+  isGeminiModelId,
+  listGeminiModels,
+  testGeminiConnection,
+  type GeminiModel,
+} from './gemini-config';
 
 export class PersonalSettingsError extends Error {
   constructor(
@@ -14,9 +19,7 @@ export class PersonalSettingsError extends Error {
 export const personalSettingsInput = z
   .object({
     version: z.number().int().nonnegative(),
-    model: z
-      .string()
-      .refine((value) => GEMINI_MODELS.some((model) => model.id === value)),
+    model: z.string().refine(isGeminiModelId),
     apiKey: z
       .string()
       .trim()
@@ -26,6 +29,10 @@ export const personalSettingsInput = z
       .regex(/^[\x21-\x7e]+$/)
       .optional(),
   })
+  .strict();
+
+export const personalModelsInput = personalSettingsInput
+  .pick({ version: true, apiKey: true })
   .strict();
 
 type Row = {
@@ -41,7 +48,7 @@ export type PersonalAiStatus = {
   model: string | null;
   version: number;
   checkedAt: string | null;
-  availableModels: typeof GEMINI_MODELS;
+  availableModels: GeminiModel[];
 };
 
 const bytes = new TextEncoder();
@@ -117,6 +124,7 @@ export function personalSettings(
   subject: string,
   secret: string | undefined,
   verify = testGeminiConnection,
+  fetcher: typeof fetch = fetch,
 ) {
   const read = () =>
     db
@@ -133,7 +141,8 @@ export function personalSettings(
       model: row?.model ?? null,
       version: row?.version ?? 0,
       checkedAt: row?.checked_at ?? null,
-      availableModels: GEMINI_MODELS,
+      // A saved model is a historical choice, not a guessed availability list.
+      availableModels: row?.model ? [{ id: row.model, label: row.model }] : [],
     };
   }
   async function change(
@@ -182,6 +191,26 @@ export function personalSettings(
   }
   return {
     status,
+    async models(input: z.infer<typeof personalModelsInput>) {
+      const row = await read();
+      if ((row?.version ?? 0) !== input.version)
+        throw new PersonalSettingsError(
+          'CONFLICT',
+          '설정이 변경되었습니다. 새로 확인해 주세요.',
+          409,
+        );
+      const apiKey =
+        input.apiKey ??
+        (row?.encrypted_key
+          ? await decryptKey(row.encrypted_key, subject, secret)
+          : null);
+      if (!apiKey)
+        throw new PersonalSettingsError(
+          'API_KEY_REQUIRED',
+          'Gemini API 키를 입력해 주세요.',
+        );
+      return { availableModels: await listGeminiModels(apiKey, fetcher) };
+    },
     async save(input: z.infer<typeof personalSettingsInput>) {
       await cryptoKey(secret);
       const row = await read();
@@ -202,6 +231,7 @@ export function personalSettings(
           'Gemini API 키를 입력해 주세요.',
         );
       await verify({
+        fetcher,
         environment: { GEMINI_API_KEY: apiKey, GEMINI_MODEL: input.model },
         verifyResponse: true,
       });

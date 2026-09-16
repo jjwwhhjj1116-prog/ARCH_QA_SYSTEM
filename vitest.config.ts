@@ -2,7 +2,14 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  resolve: { alias: { '@': fileURLToPath(new URL('./', import.meta.url)) } },
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./', import.meta.url)),
+      'next/image': fileURLToPath(
+        new URL('./node_modules/vinext/dist/shims/image.js', import.meta.url),
+      ),
+    },
+  },
   test: {
     environment: 'jsdom',
     exclude: ['tests/e2e/**', 'node_modules/**'],

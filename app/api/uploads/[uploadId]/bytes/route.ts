@@ -1,4 +1,4 @@
-import { z, ZodError } from 'zod';
+import { z } from 'zod';
 import {
   authenticateRequest,
   AuthenticationError,
@@ -8,6 +8,7 @@ import type {
   ApiSuccessEnvelope,
 } from '@/lib/domain/contracts';
 import { SourceFileConflictError } from '@/lib/files/storage';
+import { DriveError } from '@/lib/files/google-drive';
 import {
   FileStorageUnavailableError,
   getPrivateFileStorage,
@@ -39,10 +40,31 @@ export async function PUT(
   try {
     assertSameSiteMutation(request.headers, new URL(request.url).origin);
     const { uploadId: rawUploadId } = await context.params;
-    const uploadId = opaqueIdSchema.parse(rawUploadId);
+    const parsedId = opaqueIdSchema.safeParse(rawUploadId);
+    if (!parsedId.success) {
+      return Response.json(
+        {
+          error: {
+            code: 'INVALID_INPUT',
+            message: '업로드 식별자를 확인해 주세요.',
+            requestId,
+          },
+        },
+        {
+          status: 400,
+          headers: { 'cache-control': 'no-store', 'x-request-id': requestId },
+        },
+      );
+    }
+    const uploadId = parsedId.data;
     const actor = await authenticateRequest(request.headers, runtimeMode(), {
       allowDevelopmentMock: process.env.LOCAL_DEMO_MODE === 'true',
     });
+    if (process.env.FILE_STORAGE_PROVIDER === 'google-drive') {
+      throw new SourceUploadStateError(
+        '자료 등록 방식이 변경되었습니다. 페이지를 새로고침한 뒤 이어 올려 주세요.',
+      );
+    }
     const service = new SourceUploadService(
       new D1SourcePackageRepository(),
       getPrivateFileStorage(),
@@ -64,7 +86,6 @@ function failure(error: unknown, requestId: string): Response {
   let status = 500;
   let code = 'INTERNAL_ERROR';
   let message = '산출서와 집계표 파일을 안전하게 저장하지 못했습니다.';
-  let details: unknown;
   if (error instanceof AuthenticationError) {
     status = error.status;
     code = error.code;
@@ -80,6 +101,10 @@ function failure(error: unknown, requestId: string): Response {
     status = 409;
     code = error.code;
     message = error.message;
+  } else if (error instanceof DriveError) {
+    status = error.status;
+    code = error.code;
+    message = error.message;
   } else if (error instanceof FileStorageUnavailableError) {
     status = 503;
     code = error.code;
@@ -92,14 +117,9 @@ function failure(error: unknown, requestId: string): Response {
     status = error.status;
     code = error.code;
     message = error.message;
-  } else if (error instanceof ZodError) {
-    status = 400;
-    code = 'INVALID_INPUT';
-    message = '업로드 식별자를 확인해 주세요.';
-    details = z.treeifyError(error);
   }
   const body: ApiErrorEnvelope = {
-    error: { code, message, requestId, ...(details ? { details } : {}) },
+    error: { code, message, requestId },
   };
   return Response.json(body, {
     status,

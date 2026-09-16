@@ -15,10 +15,18 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { type SyntheticEvent, useEffect, useRef, useState } from 'react';
+import {
+  type RefObject,
+  type SyntheticEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { ProjectSummary } from '@/lib/domain/contracts';
 
 type Props = {
+  createButtonRef?: RefObject<HTMLButtonElement | null>;
+  createError?: string;
   projects: ProjectSummary[];
   visibleProjects: ProjectSummary[];
   loadState: 'loading' | 'ready' | 'error';
@@ -39,6 +47,8 @@ type Props = {
 };
 
 export function ProjectRegistrationWorkspace({
+  createButtonRef,
+  createError,
   projects,
   visibleProjects,
   loadState,
@@ -70,7 +80,8 @@ export function ProjectRegistrationWorkspace({
         )}
         action={
           <button
-            className="primary-action"
+            className="sidebar-project-add"
+            ref={createButtonRef}
             type="button"
             onClick={onToggleCreate}
           >
@@ -96,6 +107,7 @@ export function ProjectRegistrationWorkspace({
 
       {showCreate && (
         <ProjectCreationForm
+          error={createError}
           submitting={submitting}
           onCreateProject={onCreateProject}
           onToggleCreate={onToggleCreate}

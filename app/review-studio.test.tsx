@@ -12,13 +12,338 @@ import type { SourcePackageSummary } from '@/lib/ingestion/contracts';
 import { ProjectDataWorkspace } from './project-data-workspace';
 import { ReviewStudio } from './review-studio';
 
+// jsdom File does not implement Blob.arrayBuffer(); exercise native hashing.
+Object.defineProperty(File.prototype, 'arrayBuffer', {
+  configurable: true,
+  value: function (this: File) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  },
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
 describe('ReviewStudio', () => {
-  it('uses the official title, project sidebar, three-step workflow, and source wording', async () => {
+  it.each([false, true])(
+    'prepares registered originals before opening review and permits retry after failure (%s)',
+    async (failFirst) => {
+      const project = projectFixture('P100', '등록 원본 검수 연결');
+      const reviewCase = caseFixture(project.id, '마감');
+      const pending = sourcePackageFixture({
+        projectId: project.id,
+        reviewCaseId: reviewCase.id,
+        status: 'upload_pending',
+      });
+      const registered = {
+        ...pending,
+        files: pending.files.map((file) => ({
+          ...file,
+          status: 'uploaded' as const,
+          uploadState: 'uploaded' as const,
+        })),
+      };
+      let release!: (response: Response) => void;
+      let preparations = 0;
+      const fetcher = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input, init) => {
+          const url = requestUrl(input);
+          if (url === '/api/projects') return jsonResponse([project]);
+          if (url.endsWith('/cases')) return jsonResponse([reviewCase]);
+          if (url.endsWith('/source-packages'))
+            return jsonResponse([registered]);
+          if (
+            url === `/api/projects/${project.id}/review` &&
+            init?.method === 'POST'
+          ) {
+            expect(
+              JSON.parse(typeof init.body === 'string' ? init.body : 'null'),
+            ).toEqual({
+              action: 'prepare-source',
+              caseId: reviewCase.id,
+              uploadId: pending.files[0].uploadId,
+            });
+            preparations++;
+            return new Promise<Response>((resolve) => {
+              release = resolve;
+            });
+          }
+          if (url.includes('/review?'))
+            return jsonResponse({
+              sources: [],
+              profiles: [],
+              runs: [],
+              mappings: [],
+            });
+          throw new Error(`Unexpected request: ${url}`);
+        });
+      renderProjectWorkspace();
+      fireEvent.click(
+        within(
+          await screen.findByRole('row', { name: /등록 원본 검수 연결/u }),
+        ).getByRole('button', { name: '선택하고 자료 등록' }),
+      );
+      fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+      const start = await screen.findByRole('button', {
+        name: /STEP 2 · AI 검수 시작/u,
+      });
+      await waitFor(() => expect(start).toBeEnabled());
+      fireEvent.click(start);
+      fireEvent.click(start);
+      expect(preparations).toBe(1);
+      expect(start).toBeDisabled();
+      if (failFirst) {
+        release(
+          Response.json(
+            {
+              error: {
+                code: 'SOURCE_INSPECTION_FAILED',
+                message: '검사 중단 · 원본 보존',
+                requestId: 'test',
+              },
+            },
+            { status: 422 },
+          ),
+        );
+        await screen.findByText(/검사 중단 · 원본 보존/u);
+        expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
+        expect(
+          screen.getByRole('button', { name: /원본 다운로드/u }),
+        ).toBeEnabled();
+        await waitFor(() => expect(start).toBeEnabled());
+        fireEvent.click(start);
+        expect(preparations).toBe(2);
+      }
+      release(
+        jsonResponse({
+          prepared: true,
+          sourceVersionId: pending.files[0].sourceVersionId,
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          within(
+            screen.getByRole('navigation', { name: '작업 순서' }),
+          ).getByRole('button', { name: /산출식 AI 검수/u }),
+        ).toHaveAttribute('aria-current', 'page'),
+      );
+      expect(
+        fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE'),
+      ).toBe(false);
+      expect(
+        fetcher.mock.calls.some(([input]) =>
+          requestUrl(input).endsWith('/transfer'),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('retains selected files and reports a package-stage non-JSON 503 without claiming a transfer failure', async () => {
+    const project = projectFixture('P100', '등록 응답 검증');
+    const reviewCase = caseFixture(project.id, '마감');
+    const fetcher = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects') return jsonResponse([project]);
+        if (url.endsWith('/cases')) return jsonResponse([reviewCase]);
+        if (url.endsWith('/source-packages')) {
+          if (init?.method === 'POST')
+            return new Response('<html>private platform response</html>', {
+              status: 503,
+            });
+          return jsonResponse([]);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+    renderProjectWorkspace();
+    fireEvent.click(
+      within(
+        await screen.findByRole('row', { name: /등록 응답 검증/u }),
+      ).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+    await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
+    fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+      target: {
+        files: [
+          new File(['a,b\nc,1\n'], '내부산출서.csv', { type: 'text/csv' }),
+        ],
+      },
+    });
+    const submit = screen.getByRole('button', { name: '선택 파일 저장' });
+    fireEvent.submit(submit.closest('form')!);
+    await screen.findByText(/서버에서 파일 처리가 중단되었습니다\(HTTP 503\)/u);
+    expect(
+      screen.getByText(/파일 전송은 시작하지 않았으며 선택 파일은 유지됩니다/u),
+    ).toBeVisible();
+    expect(screen.queryByText(/private platform response/u)).toBeNull();
+    expect(screen.getByText('내부산출서.csv', { exact: true })).toBeVisible();
+    expect(
+      fetcher.mock.calls.filter(([url]) =>
+        requestUrl(url).startsWith('/api/uploads/'),
+      ),
+    ).toHaveLength(0);
+    await waitFor(() => expect(submit).toBeEnabled());
+  });
+  it.each([true, false])(
+    'uses resumable registration without promoting pending originals to AI-ready (success: %s)',
+    async (succeeds) => {
+      const project = projectFixture('P100', '분할 저장 프로젝트');
+      const reviewCase = caseFixture(project.id, '분할 저장 마감');
+      const pending = sourcePackageFixture({
+        projectId: project.id,
+        reviewCaseId: reviewCase.id,
+        status: 'upload_pending',
+      });
+      const resumable = {
+        ...pending,
+        files: pending.files.map((file) => ({
+          ...file,
+          transferMode: 'resumable' as const,
+        })),
+      };
+      let transferred = false;
+      const fetcher = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input, init) => {
+          const url = requestUrl(input);
+          if (url === '/api/projects') return jsonResponse([project]);
+          if (url.endsWith('/cases')) return jsonResponse([reviewCase]);
+          if (url.endsWith('/source-packages')) {
+            if (init?.method === 'POST') return jsonResponse(resumable, 201);
+            return jsonResponse(
+              transferred
+                ? [
+                    {
+                      ...resumable,
+                      files: resumable.files.map((file) => ({
+                        ...file,
+                        status: 'uploaded',
+                      })),
+                    },
+                  ]
+                : [],
+            );
+          }
+          if (url.endsWith('/transfer')) {
+            if (!succeeds)
+              return Response.json(
+                {
+                  error: {
+                    code: 'DRIVE_NOT_CONNECTED',
+                    message: '회사 Drive 연결을 확인하세요.',
+                    requestId: 'r-drive',
+                  },
+                },
+                { status: 409 },
+              );
+            if (init?.method === 'PUT') transferred = true;
+            return jsonResponse({
+              uploadId: pending.files[0].uploadId,
+              offset: transferred ? 8 : 0,
+              sizeBytes: 8,
+              chunkBytes: 1048576,
+              status: transferred ? 'uploaded' : 'uploading',
+            });
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        });
+      renderProjectWorkspace();
+      fireEvent.click(
+        within(
+          await screen.findByRole('row', { name: /분할 저장 프로젝트/u }),
+        ).getByRole('button', { name: '선택하고 자료 등록' }),
+      );
+      fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+      await screen.findByText(
+        '이 팀에 저장된 산출서와 집계표가 아직 없습니다.',
+      );
+      fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+        target: {
+          files: [
+            new File(['a,b\nc,1\n'], '내부산출서.csv', { type: 'text/csv' }),
+          ],
+        },
+      });
+      const submit = screen.getByRole('button', { name: '선택 파일 저장' });
+      await waitFor(() => expect(submit).toBeEnabled());
+      fireEvent.submit(submit.closest('form')!);
+      if (succeeds) {
+        await waitFor(() =>
+          expect(
+            document.querySelector('.source-upload-progress'),
+          ).toHaveTextContent('1개 등록 완료'),
+        );
+        expect(
+          screen.getByText(
+            '자료 등록 완료. AI 검수 시작을 누르면 저장된 자료로 다음 단계를 진행합니다.',
+          ),
+        ).toBeVisible();
+        expect(
+          screen.getByRole('button', { name: /원본 다운로드/u }),
+        ).toBeEnabled();
+      } else {
+        expect(
+          await screen.findByText('회사 Drive 연결을 확인하세요.'),
+        ).toBeVisible();
+        expect(screen.getByText(/DRIVE_NOT_CONNECTED/u)).toBeVisible();
+        expect(
+          screen.getByRole('button', { name: '선택 파일 저장' }),
+        ).toBeEnabled();
+      }
+      expect(
+        screen.getByRole('button', { name: /STEP 2 · AI 검수 시작/u }),
+      ).toBeDisabled();
+      expect(
+        fetcher.mock.calls.some(([input]) =>
+          requestUrl(input).endsWith('/bytes'),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('separates personal and admin settings without requiring a project for company connections', async () => {
+    mockProjects([]);
+    render(
+      <ReviewStudio
+        currentUser={{
+          displayName: '관리자',
+          email: 'yjw@con-cost.com',
+          isAdmin: true,
+        }}
+      />,
+    );
+    await screen.findByText('첫 검수 프로젝트를 등록하세요');
+    fireEvent.click(screen.getByRole('button', { name: /^설정$/u }));
+    expect(
+      screen.getByRole('heading', { name: '개인 설정', level: 1 }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: '회사 공용 Gemini API' }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^관리자 설정$/u }));
+    expect(
+      await screen.findByRole('heading', { name: '회사 공용 Gemini API' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /^검수 지침 관리$/u }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /^개인 설정$/u }));
+    expect(
+      screen.queryByRole('heading', { name: '회사 공용 Gemini API' }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^홈$/u }));
+    await screen.findByText('첫 검수 프로젝트를 등록하세요');
+  });
+  it('opens home with the official title and an ordered left workflow instead of settings', async () => {
     mockProjects([]);
     renderStudio();
     expect(
@@ -26,25 +351,112 @@ describe('ReviewStudio', () => {
         selector: '.topbar-title strong',
       }),
     ).toBeVisible();
-    const navigation = screen.getByRole('navigation', { name: '프로젝트' });
-    expect(within(navigation).getByText('새 프로젝트')).toBeVisible();
-    expect(within(navigation).getByText('프로젝트 목록')).toBeVisible();
-    expect(within(navigation).getByText('설정')).toBeVisible();
-    const workflow = screen.getByRole('region', { name: '검수 진행 단계' });
-    expect(within(workflow).getByText(/STEP 1 · 자료 등록/u)).toBeVisible();
-    expect(within(workflow).getByText(/STEP 2 · AI 검수/u)).toBeVisible();
+    const navigation = screen.getByRole('navigation', { name: '작업 순서' });
     expect(
-      within(workflow).getByText(/STEP 3 · 수량산출 분석표/u),
+      within(navigation).getByRole('button', { name: /^홈$/u }),
+    ).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(navigation).getByRole('button', { name: /^프로젝트$/u }),
     ).toBeVisible();
+    expect(
+      within(navigation).queryByRole('button', { name: /^설정$/u }),
+    ).toBeNull();
+    const settings = screen.getByRole('button', { name: /^설정$/u });
+    expect(settings).toBeVisible();
+    expect(settings.closest('.sidebar-foot')).not.toBeNull();
+    expect(settings.nextElementSibling).toHaveClass('employee-profile');
+    expect(settings.closest('.workflow-navigation')).toBeNull();
+    for (const label of [
+      'STEP 1. 자료등록',
+      'STEP 2. AI 검수',
+      'STEP 3. 수량산출 분석표',
+    ]) {
+      expect(within(navigation).getByText(label)).toBeVisible();
+    }
+    expect(
+      within(navigation).queryByRole('button', { name: '새 프로젝트' }),
+    ).toBeNull();
+    expect(screen.queryByRole('region', { name: '검수 진행 단계' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '검수 작업 홈' })).toBeVisible();
+    expect(screen.queryByText('개인 Gemini API 연결')).toBeNull();
+    expect(screen.getByRole('button', { name: '새 프로젝트' })).toBeVisible();
     await screen.findByText('첫 검수 프로젝트를 등록하세요');
     expect(screen.getByText(/산출서와 집계표/u)).toBeVisible();
     expect(document.querySelectorAll('.brand-logo')).toHaveLength(2);
+    expect(document.querySelector('.qc-current-project')).toBeNull();
+    for (const label of ['마감', '구조']) {
+      expect(
+        within(navigation)
+          .getByText(label, { selector: 'summary' })
+          .closest('details'),
+      ).not.toHaveAttribute('open');
+    }
+  });
+
+  it('opens settings from the fixed footer with the same selected state and returns home', async () => {
+    mockProjects([]);
+    renderStudio();
+    await screen.findByText('첫 검수 프로젝트를 등록하세요');
+    const settings = screen.getByRole('button', { name: /^설정$/u });
+    expect(settings).not.toHaveAttribute('aria-current');
+    settings.focus();
+    expect(settings).toHaveFocus();
+    fireEvent.click(settings);
+    expect(settings).toHaveAttribute('aria-current', 'page');
+    expect(
+      screen.getByRole('heading', { name: /^개인 설정$/u, level: 1 }),
+    ).toBeVisible();
+    expect(settings.querySelector('.lucide-settings')).not.toBeNull();
+    expect(settings.querySelector('.nav-current-check')).not.toBeNull();
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: '작업 순서' })).getByRole(
+        'button',
+        { name: '홈' },
+      ),
+    );
+    expect(settings).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('heading', { name: '검수 작업 홈' })).toBeVisible();
+  });
+
+  it('keeps the current project visible when returning home and resumes the same project', async () => {
+    const project = projectFixture('P100', '계속 검수할 프로젝트');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return jsonResponse([project]);
+      if (url.endsWith('/cases')) return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderProjectWorkspace();
+    fireEvent.click(
+      within(
+        await screen.findByRole('row', { name: /계속 검수할 프로젝트/u }),
+      ).getByRole('button', { name: '선택하고 자료 등록' }),
+    );
+    await screen.findByText('등록할 팀 선택');
+    const workflow = screen.getByRole('navigation', { name: '작업 순서' });
+    fireEvent.click(within(workflow).getByRole('button', { name: '홈' }));
+    const home = screen.getByRole('region', { name: '검수 작업 홈' });
+    expect(home.querySelector('.qc-current-project')).toHaveTextContent(
+      `현재 프로젝트: ${project.name}`,
+    );
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      project.id,
+    );
+    fireEvent.click(
+      within(workflow).getByRole('button', { name: 'STEP 1. 자료등록' }),
+    );
+    expect(
+      await screen.findByRole('region', { name: project.name }),
+    ).toBeVisible();
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      project.id,
+    );
   });
 
   it('keeps project registration and project data on separate screens', async () => {
     const project = projectFixture('P100', '웹 검수 프로젝트');
     mockProjects([project]);
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     expect(screen.queryByText('등록할 팀 선택')).toBeNull();
     expect(screen.queryByText('산출서와 집계표 원본 등록')).toBeNull();
@@ -81,7 +493,7 @@ describe('ReviewStudio', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /삭제 확인 프로젝트/u });
     fireEvent.click(within(row).getByRole('button', { name: '삭제' }));
     const dialog = screen.getByRole('dialog', {
@@ -94,9 +506,9 @@ describe('ReviewStudio', () => {
     );
   });
 
-  it('creates projects inside the sidebar without closing the current workspace first', async () => {
+  it('creates a project in the right workspace while keeping the selected project until save', async () => {
     const existing = projectFixture('P1', '기존 프로젝트');
-    const created = projectFixture('P2', '왼쪽 등록 프로젝트');
+    const created = projectFixture('P2', '오른쪽 등록 프로젝트');
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input, init) => {
@@ -107,15 +519,21 @@ describe('ReviewStudio', () => {
         if (url.endsWith('/cases')) return jsonResponse([]);
         throw new Error(`Unexpected request: ${url}`);
       });
-    renderStudio();
-    const nav = screen.getByRole('navigation', { name: '프로젝트' });
+    renderProjectWorkspace();
     fireEvent.click(
-      await within(nav).findByRole('button', { name: /기존 프로젝트 ERP/u }),
+      within(
+        await screen.findByRole('row', { name: /기존 프로젝트/u }),
+      ).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     await screen.findByText('등록할 팀 선택');
-    fireEvent.click(within(nav).getByRole('button', { name: '새 프로젝트' }));
-    const form = within(nav).getByRole('form', { name: '새 프로젝트 등록' });
-    expect(screen.getByRole('region', { name: '기존 프로젝트' })).toBeVisible();
+    openProjectManagement();
+    fireEvent.click(screen.getByRole('button', { name: '새 프로젝트 등록' }));
+    const form = screen.getByRole('form', { name: '새 프로젝트 등록' });
+    const nav = screen.getByRole('navigation', { name: '작업 순서' });
+    expect(nav).not.toContainElement(form);
+    expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
+      existing.id,
+    );
     fireEvent.change(
       within(form).getByRole('textbox', { name: '프로젝트명' }),
       { target: { value: created.name } },
@@ -127,7 +545,7 @@ describe('ReviewStudio', () => {
     expect(
       await screen.findByRole('region', { name: created.name }),
     ).toBeVisible();
-    expect(within(nav).queryByRole('form')).toBeNull();
+    expect(screen.queryByRole('form', { name: '새 프로젝트 등록' })).toBeNull();
     const requests = fetchSpy.mock.calls.filter(
       ([, init]) => init?.method === 'POST',
     );
@@ -138,8 +556,8 @@ describe('ReviewStudio', () => {
     });
   });
 
-  it('keeps sidebar deletion cancelable and retryable, then clears a deleted current project', async () => {
-    const project = projectFixture('P1', '왼쪽 삭제 프로젝트');
+  it('keeps right-workspace deletion cancelable and retryable, then clears a deleted current project', async () => {
+    const project = projectFixture('P1', '오른쪽 삭제 프로젝트');
     let failDelete = true;
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -170,20 +588,19 @@ describe('ReviewStudio', () => {
         }
         throw new Error(`Unexpected request: ${url}`);
       });
-    renderStudio();
-    const nav = screen.getByRole('navigation', { name: '프로젝트' });
+    renderProjectWorkspace();
+    const row = await screen.findByRole('row', {
+      name: /오른쪽 삭제 프로젝트/u,
+    });
     fireEvent.click(
-      await within(nav).findByRole('button', {
-        name: /왼쪽 삭제 프로젝트 ERP/u,
-      }),
+      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     await screen.findByText('등록할 팀 선택');
-    const remove = within(nav).getByRole('button', {
-      name: `${project.name} 삭제`,
-    });
-    expect(
-      remove.closest('.sidebar-project-item')?.querySelector('button button'),
-    ).toBeNull();
+    openProjectManagement();
+    const remove = within(
+      screen.getByRole('row', { name: /오른쪽 삭제 프로젝트/u }),
+    ).getByRole('button', { name: '삭제' });
+    expect(remove.querySelector('button')).toBeNull();
     remove.focus();
     fireEvent.click(remove);
     let dialog = screen.getByRole('dialog');
@@ -202,7 +619,9 @@ describe('ReviewStudio', () => {
       await within(dialog).findByText('삭제를 완료하지 못했습니다.'),
     ).toBeVisible();
     expect(
-      within(nav).getByRole('button', { name: `${project.name} 삭제` }),
+      within(
+        screen.getByRole('row', { name: /오른쪽 삭제 프로젝트/u }),
+      ).getByRole('button', { name: '삭제' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
       project.id,
@@ -211,7 +630,7 @@ describe('ReviewStudio', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
     await waitFor(() =>
       expect(
-        within(nav).queryByRole('button', { name: `${project.name} 삭제` }),
+        screen.queryByRole('row', { name: /오른쪽 삭제 프로젝트/u }),
       ).toBeNull(),
     );
     expect(screen.getByRole('combobox', { name: '현재 프로젝트' })).toHaveValue(
@@ -220,28 +639,24 @@ describe('ReviewStudio', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() =>
       expect(
-        within(nav).getByRole('button', { name: '새 프로젝트' }),
+        screen.getByRole('button', { name: '새 프로젝트 등록' }),
       ).toHaveFocus(),
     );
   });
 
-  it('does not expose a sidebar delete action to a viewer', async () => {
+  it('does not expose a project delete action to a viewer in the right workspace', async () => {
     const project = {
       ...projectFixture('P1', '조회 전용 프로젝트'),
       role: 'viewer',
     };
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse([project]));
-    renderStudio();
-    const nav = screen.getByRole('navigation', { name: '프로젝트' });
-    expect(
-      await within(nav).findByRole('button', {
-        name: /조회 전용 프로젝트 ERP/u,
-      }),
-    ).toBeVisible();
-    expect(within(nav).queryByRole('button', { name: /삭제/u })).toBeNull();
+    renderProjectWorkspace();
+    const row = await screen.findByRole('row', { name: /조회 전용 프로젝트/u });
+    expect(row).toBeVisible();
+    expect(within(row).queryByRole('button', { name: /삭제/u })).toBeNull();
   });
 
-  it('uses the sidebar and header selector without a redundant project picker', async () => {
+  it('uses workflow project management and header selector without a redundant project picker', async () => {
     const projects = [
       projectFixture(
         'P1',
@@ -261,7 +676,7 @@ describe('ReviewStudio', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    renderStudio();
+    renderProjectWorkspace();
     const p1 = await screen.findByRole('row', { name: /P1 프로젝트/u });
     fireEvent.click(
       within(p1).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -295,7 +710,7 @@ describe('ReviewStudio', () => {
         { status: 500 },
       ),
     );
-    renderStudio();
+    renderProjectWorkspace();
     expect(await screen.findByText('저장소를 열지 못했습니다.')).toBeVisible();
     expect(screen.getByRole('button', { name: '다시 시도' })).toBeVisible();
   });
@@ -322,7 +737,7 @@ describe('ReviewStudio', () => {
         }
         return new Response(JSON.stringify({ data: [], requestId: 'r2' }));
       });
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -370,7 +785,7 @@ describe('ReviewStudio', () => {
         if (url.includes(records[1].id)) return jsonResponse([]);
         throw new Error(`Unexpected request: ${url}`);
       });
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /팀 기록 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -383,12 +798,12 @@ describe('ReviewStudio', () => {
     expect(within(history).getAllByRole('option')).toHaveLength(2);
     expect(
       await screen.findByRole('heading', {
-        name: '저장된 자료로 AI 검수 단계로 이동하세요.',
+        name: '1개 등록 완료',
       }),
     ).toBeVisible();
-    const workflow = screen.getByRole('region', { name: '검수 진행 단계' });
+    const workflow = screen.getByRole('navigation', { name: '작업 순서' });
     expect(
-      within(workflow).getByRole('button', { name: /STEP 2 · AI 검수/u }),
+      within(workflow).getByRole('button', { name: /산출식 AI 검수/u }),
     ).toBeEnabled();
     fireEvent.change(history, { target: { value: records[1].id } });
     await waitFor(() =>
@@ -397,7 +812,7 @@ describe('ReviewStudio', () => {
       ).toBeNull(),
     );
     expect(
-      within(workflow).getByRole('button', { name: /STEP 2 · AI 검수/u }),
+      within(workflow).getByRole('button', { name: /산출식 AI 검수/u }),
     ).toBeDisabled();
     expect(
       fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST'),
@@ -433,7 +848,7 @@ describe('ReviewStudio', () => {
       if (url.endsWith('/cases')) return jsonResponse([initialCase]);
       return jsonResponse([]);
     });
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /팀 전환 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -632,7 +1047,7 @@ describe('ReviewStudio', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -653,7 +1068,7 @@ describe('ReviewStudio', () => {
       target: { files: [file] },
     });
     const submitUpload = screen.getByRole('button', {
-      name: '원본 검사 후 저장',
+      name: '선택 파일 저장',
     });
     await waitFor(() => expect(submitUpload).toBeEnabled());
     fireEvent.submit(submitUpload.closest('form')!);
@@ -661,12 +1076,10 @@ describe('ReviewStudio', () => {
     await waitFor(() =>
       expect(
         document.querySelector('.source-upload-progress'),
-      ).toHaveTextContent(
-        '1/1개 파일 저장 완료 · 서버 자료 묶음에서 확인했습니다.',
-      ),
+      ).toHaveTextContent('1개 등록 완료'),
     );
-    expect(screen.getByText('원본 저장 완료')).toBeVisible();
-    expect(screen.getByText('1/1개 저장 ·', { exact: false })).toBeVisible();
+    expect(screen.getAllByText('등록 완료')[0]).toBeVisible();
+    expect(screen.getByText('1/1개 저장', { exact: false })).toBeVisible();
     expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
     const continueActions = screen.getAllByRole('button', {
       name: /STEP 2 · AI 검수 시작/u,
@@ -686,13 +1099,13 @@ describe('ReviewStudio', () => {
       }),
     );
     const aiChooser = screen.getByRole('navigation', {
-      name: 'AI 검수 기능 선택',
+      name: '작업 순서',
     });
     expect(
       within(aiChooser).getByRole('button', { name: /산출식 AI 검수/u }),
     ).toHaveAttribute('aria-current', 'page');
     expect(
-      within(aiChooser).getByRole('button', { name: /중복 ITEM AI 검수/u }),
+      within(aiChooser).getByRole('button', { name: /중복 ITEM 검수/u }),
     ).toBeVisible();
     expect(packageListCalls).toBe(2);
   });
@@ -780,13 +1193,14 @@ describe('ReviewStudio', () => {
           }
           throw new Error(`Unexpected request: ${url}`);
         });
-      renderStudio();
+      renderProjectWorkspace();
       fireEvent.click(
         within(
           await screen.findByRole('row', { name: /교체 테스트/u }),
         ).getByRole('button', { name: '선택하고 자료 등록' }),
       );
       fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+      fireEvent.click(screen.getByText('등록 옵션 · 기존 자료 교체'));
       const mode = await screen.findByRole('radio', { name: '기존 자료 교체' });
       await waitFor(() => expect(mode).toBeEnabled());
       fireEvent.click(mode);
@@ -797,7 +1211,7 @@ describe('ReviewStudio', () => {
           ],
         },
       });
-      const submit = screen.getByRole('button', { name: '원본 검사 후 교체' });
+      const submit = screen.getByRole('button', { name: '선택 파일 저장' });
       fireEvent.submit(submit.closest('form')!);
       expect(created).toBe(false);
       expect(confirm).toHaveBeenCalledTimes(1);
@@ -807,7 +1221,7 @@ describe('ReviewStudio', () => {
         expect(
           document.querySelector('.source-upload-progress'),
         ).toHaveTextContent(
-          succeeds ? '파일로 교체 완료' : '교체 미적용, 기존 자료 유지',
+          succeeds ? '1개 등록 완료' : '교체 미적용, 기존 자료 유지',
         ),
       );
       expect(applied).toBe(succeeds);
@@ -876,7 +1290,7 @@ describe('ReviewStudio', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -890,7 +1304,7 @@ describe('ReviewStudio', () => {
       target: { files: [file] },
     });
     const retryableSubmit = screen.getByRole('button', {
-      name: '원본 검사 후 저장',
+      name: '선택 파일 저장',
     });
     await waitFor(() => expect(retryableSubmit).toBeEnabled());
     fireEvent.submit(retryableSubmit.closest('form')!);
@@ -905,7 +1319,7 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
     expect(screen.getAllByText('내부산출서.csv').length).toBeGreaterThan(0);
     expect(
-      screen.getByRole('button', { name: '원본 검사 후 다시 저장' }),
+      screen.getByRole('button', { name: '선택 파일 저장' }),
     ).toBeEnabled();
   });
 
@@ -942,7 +1356,7 @@ describe('ReviewStudio', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -964,144 +1378,165 @@ describe('ReviewStudio', () => {
     ).toBeVisible();
   });
 
-  it('continues after one blocked workbook and stores the remaining files', async () => {
-    const project = projectFixture('P100', '웹 검수 프로젝트');
-    const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
-    const packageId = '33333333-3333-4333-8333-333333333333';
-    const blockedUploadId = '44444444-4444-4444-8444-444444444444';
-    const storedUploadId = '77777777-7777-4777-8777-777777777777';
-    const pendingPackage = {
-      ...sourcePackageFixture({
-        packageId,
-        projectId: project.id,
-        reviewCaseId: reviewCase.id,
-        uploadId: blockedUploadId,
-        status: 'upload_pending',
-      }),
-      files: [
-        {
-          uploadId: blockedUploadId,
-          sourceFileId: crypto.randomUUID(),
-          sourceVersionId: crypto.randomUUID(),
-          filename: '가설산출서.xlsx',
-          format: 'xlsx' as const,
-          documentKind: 'takeoff' as const,
-          sizeBytes: 4,
-          status: 'upload_pending' as const,
-        },
-        {
-          uploadId: storedUploadId,
-          sourceFileId: crypto.randomUUID(),
-          sourceVersionId: crypto.randomUUID(),
-          filename: '공용집계표.csv',
-          format: 'csv' as const,
-          documentKind: 'summary' as const,
-          sizeBytes: 8,
-          status: 'upload_pending' as const,
-        },
-      ],
-    };
-    let packageListCalls = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = requestUrl(input);
-      if (url === '/api/projects') return jsonResponse([project]);
-      if (url === `/api/projects/${project.id}/cases`)
-        return jsonResponse([reviewCase]);
-      if (
-        url ===
-          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
-        init?.method === 'POST'
-      )
-        return jsonResponse(pendingPackage, 201);
-      if (
-        url ===
-        `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
-      ) {
-        packageListCalls += 1;
-        return jsonResponse(
-          packageListCalls === 1
-            ? []
-            : [
-                {
-                  ...pendingPackage,
-                  files: [
-                    {
-                      ...pendingPackage.files[0],
-                      uploadState: 'failed',
-                      errorCode: 'FILE_XLSX_ACTIVE_CONTENT',
-                    },
-                    { ...pendingPackage.files[1], status: 'stored' },
-                  ],
-                },
-              ],
-        );
-      }
-      if (url === `/api/uploads/${blockedUploadId}/bytes`) {
-        return new Response(
-          JSON.stringify({
-            error: {
-              code: 'FILE_XLSX_ACTIVE_CONTENT',
-              message:
-                '실행 가능한 포함 개체가 있어 이 파일을 저장하지 않았습니다.',
-              requestId: 'r-blocked',
-            },
-          }),
-          { status: 400 },
-        );
-      }
-      if (url === `/api/uploads/${storedUploadId}/bytes`) {
-        return jsonResponse({
-          uploadId: storedUploadId,
+  it.each([false, true])(
+    'reconciles partial upload against server state (committed despite response loss: %s)',
+    async (committed) => {
+      const project = projectFixture('P100', '웹 검수 프로젝트');
+      const reviewCase = caseFixture(
+        project.id,
+        '웹 검수 프로젝트 마감 검수 1',
+      );
+      const packageId = '33333333-3333-4333-8333-333333333333';
+      const blockedUploadId = '44444444-4444-4444-8444-444444444444';
+      const storedUploadId = '77777777-7777-4777-8777-777777777777';
+      const pendingPackage = {
+        ...sourcePackageFixture({
           packageId,
-          filename: '공용집계표.csv',
-          status: 'stored',
-          packageStatus: 'stored_unverified',
-          projectIdentityStatus: 'pending',
-          sha256: 'a'.repeat(64),
-          sizeBytes: 8,
-          warnings: [],
-        });
+          projectId: project.id,
+          reviewCaseId: reviewCase.id,
+          uploadId: blockedUploadId,
+          status: 'upload_pending',
+        }),
+        files: [
+          {
+            uploadId: blockedUploadId,
+            sourceFileId: crypto.randomUUID(),
+            sourceVersionId: crypto.randomUUID(),
+            filename: '가설산출서.xlsx',
+            format: 'xlsx' as const,
+            documentKind: 'takeoff' as const,
+            sizeBytes: 4,
+            status: 'upload_pending' as const,
+          },
+          {
+            uploadId: storedUploadId,
+            sourceFileId: crypto.randomUUID(),
+            sourceVersionId: crypto.randomUUID(),
+            filename: '공용집계표.csv',
+            format: 'csv' as const,
+            documentKind: 'summary' as const,
+            sizeBytes: 8,
+            status: 'upload_pending' as const,
+          },
+        ],
+      };
+      let packageListCalls = 0;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = requestUrl(input);
+        if (url === '/api/projects') return jsonResponse([project]);
+        if (url === `/api/projects/${project.id}/cases`)
+          return jsonResponse([reviewCase]);
+        if (
+          url ===
+            `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages` &&
+          init?.method === 'POST'
+        )
+          return jsonResponse(pendingPackage, 201);
+        if (
+          url ===
+          `/api/projects/${project.id}/cases/${reviewCase.id}/source-packages`
+        ) {
+          packageListCalls += 1;
+          return jsonResponse(
+            packageListCalls === 1
+              ? []
+              : [
+                  {
+                    ...pendingPackage,
+                    files: [
+                      {
+                        ...pendingPackage.files[0],
+                        ...(committed ? { status: 'stored' } : {}),
+                        uploadState: 'failed',
+                        errorCode: 'FILE_XLSX_ACTIVE_CONTENT',
+                      },
+                      { ...pendingPackage.files[1], status: 'stored' },
+                    ],
+                  },
+                ],
+          );
+        }
+        if (url === `/api/uploads/${blockedUploadId}/bytes`) {
+          if (committed)
+            return new Response('Worker exceeded resource limits', {
+              status: 503,
+            });
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 'FILE_XLSX_ACTIVE_CONTENT',
+                message:
+                  '실행 가능한 포함 개체가 있어 이 파일을 저장하지 않았습니다.',
+                requestId: 'r-blocked',
+              },
+            }),
+            { status: 400 },
+          );
+        }
+        if (url === `/api/uploads/${storedUploadId}/bytes`) {
+          return jsonResponse({
+            uploadId: storedUploadId,
+            packageId,
+            filename: '공용집계표.csv',
+            status: 'stored',
+            packageStatus: 'stored_unverified',
+            projectIdentityStatus: 'pending',
+            sha256: 'a'.repeat(64),
+            sizeBytes: 8,
+            warnings: [],
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+
+      renderProjectWorkspace();
+      const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
+      fireEvent.click(
+        within(row).getByRole('button', { name: '선택하고 자료 등록' }),
+      );
+      fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
+      await screen.findByText(
+        '이 팀에 저장된 산출서와 집계표가 아직 없습니다.',
+      );
+      const files = [
+        new File(['xlsx'], '가설산출서.xlsx', {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        new File(['a,b\nc,1\n'], '공용집계표.csv', { type: 'text/csv' }),
+      ];
+      fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
+        target: { files },
+      });
+      const submit = screen.getByRole('button', { name: '선택 파일 저장' });
+      await waitFor(() => expect(submit).toBeEnabled());
+      fireEvent.submit(submit.closest('form')!);
+
+      if (committed) {
+        await screen.findByText(
+          /2개 산출서와 집계표를 저장하고 서버 목록에서 확인했습니다/u,
+        );
+        expect(screen.queryByText('저장하지 못한 파일')).toBeNull();
+        expect(screen.queryByText(/UPLOAD_HTTP_503/u)).toBeNull();
+        return;
       }
-      throw new Error(`Unexpected request: ${url}`);
-    });
-
-    renderStudio();
-    const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
-    fireEvent.click(
-      within(row).getByRole('button', { name: '선택하고 자료 등록' }),
-    );
-    fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
-    await screen.findByText('이 팀에 저장된 산출서와 집계표가 아직 없습니다.');
-    const files = [
-      new File(['xlsx'], '가설산출서.xlsx', {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }),
-      new File(['a,b\nc,1\n'], '공용집계표.csv', { type: 'text/csv' }),
-    ];
-    fireEvent.change(screen.getByLabelText(/산출서와 집계표 선택/u), {
-      target: { files },
-    });
-    const submit = screen.getByRole('button', { name: '원본 검사 후 저장' });
-    await waitFor(() => expect(submit).toBeEnabled());
-    fireEvent.submit(submit.closest('form')!);
-
-    await waitFor(() =>
+      await waitFor(() =>
+        expect(
+          document.querySelector('.source-upload-progress'),
+        ).toHaveTextContent('1/2개 서버 저장 완료'),
+      );
+      expect(screen.getByText('저장하지 못한 파일')).toBeVisible();
+      expect(screen.getAllByText('가설산출서.xlsx').length).toBeGreaterThan(0);
       expect(
-        document.querySelector('.source-upload-progress'),
-      ).toHaveTextContent('1/2개 서버 저장 완료'),
-    );
-    expect(screen.getByText('저장하지 못한 파일')).toBeVisible();
-    expect(screen.getAllByText('가설산출서.xlsx').length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(/FILE_XLSX_ACTIVE_CONTENT/u).length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(/실행 가능한 포함 개체/u).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText('공용집계표.csv').length).toBeGreaterThan(0);
-  });
+        screen.getAllByText(/FILE_XLSX_ACTIVE_CONTENT/u).length,
+      ).toBeGreaterThan(0);
+      expect(
+        screen.getAllByText(/실행 가능한 포함 개체/u).length,
+      ).toBeGreaterThan(0);
+      expect(screen.getAllByText('공용집계표.csv').length).toBeGreaterThan(0);
+    },
+  );
 
-  it('keeps overview and structure analysis disabled while finish analysis is available', async () => {
+  it('routes finish and structure menus without presenting unimplemented analysis as completed', async () => {
     const project = projectFixture('P100', '웹 검수 프로젝트');
     const reviewCase = caseFixture(project.id, '웹 검수 프로젝트 마감 검수 1');
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -1122,26 +1557,59 @@ describe('ReviewStudio', () => {
         ]);
       throw new Error(`Unexpected request: ${url}`);
     });
-    renderStudio();
+    renderProjectWorkspace();
     const row = await screen.findByRole('row', { name: /웹 검수 프로젝트/u });
     fireEvent.click(
       within(row).getByRole('button', { name: '선택하고 자료 등록' }),
     );
     fireEvent.click(await screen.findByRole('button', { name: '마감팀' }));
-    await screen.findByText('원본 저장 완료');
+    await screen.findAllByText('등록 완료');
+    const workflow = screen.getByRole('navigation', { name: '작업 순서' });
     fireEvent.click(
-      screen.getByRole('button', { name: /STEP 3 · 수량산출 분석표/u }),
+      within(workflow).getByRole('button', { name: '분석표 개요' }),
     );
-
-    expect(screen.getByRole('button', { name: /분석표 개요/u })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /구조팀/u })).toBeDisabled();
-    for (const label of [
-      '마감 · 내부',
-      '마감 · 외부',
-      '마감 · 조적',
-      '마감 · 창호',
-    ]) {
-      expect(screen.getByRole('button', { name: label })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Excel 다운로드' }),
+    ).toBeDisabled();
+    expect(screen.getByText('N/A · 원천 미등록')).toBeVisible();
+    const finishGroup = within(workflow)
+      .getByText('마감', { selector: 'summary' })
+      .closest('details');
+    const structureGroup = within(workflow)
+      .getByText('구조', { selector: 'summary' })
+      .closest('details');
+    expect(finishGroup).not.toHaveAttribute('open');
+    expect(structureGroup).not.toHaveAttribute('open');
+    fireEvent.click(
+      within(workflow).getByText('마감', { selector: 'summary' }),
+    );
+    for (const label of ['내부', '외부', '조적', '창호']) {
+      const button = within(workflow).getByRole('button', { name: label });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-current', 'page');
+      expect(finishGroup).toHaveAttribute('open');
+      expect(structureGroup).not.toHaveAttribute('open');
+      if (label === '조적')
+        expect(screen.getByText('SYSTEM_HARD_RULE · 계산 제외')).toBeVisible();
+      else expect(screen.getByText('N/A · 미실행')).toBeVisible();
+    }
+    fireEvent.click(
+      within(workflow).getByText('구조', { selector: 'summary' }),
+    );
+    for (const label of ['보', '아파트옹벽', '아파트슬라브']) {
+      const button = within(workflow).getByRole('button', { name: label });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-current', 'page');
+      expect(
+        screen.getByRole('heading', { name: `구조 · ${label} 공종별 분석표` }),
+      ).toBeVisible();
+      expect(structureGroup).toHaveAttribute('open');
+      expect(finishGroup).not.toHaveAttribute('open');
+      expect(screen.getByText('N/A · 미실행')).toBeVisible();
+      expect(
+        screen.queryByRole('button', { name: /실행|다운로드/u }),
+      ).toBeNull();
     }
   });
 
@@ -1174,7 +1642,7 @@ describe('ReviewStudio', () => {
         else resolveP2 = resolve;
       });
     });
-    renderStudio();
+    renderProjectWorkspace();
     const p1 = await screen.findByRole('row', { name: /P1 프로젝트/u });
     fireEvent.click(
       within(p1).getByRole('button', { name: '선택하고 자료 등록' }),
@@ -1210,6 +1678,21 @@ describe('ReviewStudio', () => {
     );
   });
 });
+
+function openProjectManagement() {
+  fireEvent.click(
+    within(screen.getByRole('navigation', { name: '작업 순서' })).getByRole(
+      'button',
+      { name: /^프로젝트$/u },
+    ),
+  );
+}
+
+function renderProjectWorkspace() {
+  const result = renderStudio();
+  openProjectManagement();
+  return result;
+}
 
 function renderStudio() {
   return render(

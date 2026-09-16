@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SourcePackageAccessError } from '@/lib/ingestion/repository';
+import { DriveError } from '@/lib/files/google-drive';
+import { z } from 'zod';
 
 const store = vi.fn();
 vi.mock('@/lib/ingestion/upload-service', () => ({
@@ -22,6 +24,28 @@ const uploadId = '11111111-1111-4111-8111-111111111111';
 const context = { params: Promise.resolve({ uploadId }) };
 
 describe('source upload byte API', () => {
+  it('does not mislabel internal validation as a malformed upload ID', async () => {
+    const invalid = z.string().safeParse(undefined);
+    if (invalid.success) throw new Error('invalid test');
+    store.mockRejectedValueOnce(invalid.error);
+    const response = await PUT(binaryRequest(new Uint8Array([1])), context);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INTERNAL_ERROR');
+  });
+  it('preserves safe Drive error guidance', async () => {
+    store.mockRejectedValueOnce(
+      new DriveError(
+        'DRIVE_NOT_CONNECTED',
+        '관리자 설정에서 회사 Google Drive를 연결해 주세요.',
+        503,
+      ),
+    );
+    const response = await PUT(binaryRequest(new Uint8Array([1])), context);
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('DRIVE_NOT_CONNECTED');
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LOCAL_DEMO_MODE = 'true';

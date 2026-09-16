@@ -2,13 +2,20 @@ import { sites } from '@openai/sites-vite-plugin';
 import tailwindcss from '@tailwindcss/postcss';
 import vinext from 'vinext';
 import { defineConfig } from 'vite';
-import hostingConfig from './.openai/hosting.json' with { type: 'json' };
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import directConfig from './wrangler.cloudflare.json' with { type: 'json' };
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   '00000000-0000-4000-8000-000000000000';
 const COMPATIBILITY_DATE = '2026-09-01';
 
-const { d1, r2 } = hostingConfig;
+const direct = process.env.QC_DEPLOY_TARGET === 'cloudflare';
+const { d1, r2 } = direct
+  ? {}
+  : JSON.parse(
+      readFileSync(new URL('./.openai/hosting.json', import.meta.url), 'utf8'),
+    );
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
@@ -52,8 +59,14 @@ export default defineConfig(async () => {
 
   return {
     define: {
+      ...(direct
+        ? {
+            'process.env.EMPLOYEE_LOGIN_ENABLED': JSON.stringify('true'),
+            'process.env.FILE_STORAGE_PROVIDER': JSON.stringify('google-drive'),
+          }
+        : {}),
       'process.env.LOCAL_DEMO_MODE': JSON.stringify(
-        process.env.LOCAL_DEMO_MODE ?? '',
+        direct ? 'false' : (process.env.LOCAL_DEMO_MODE ?? ''),
       ),
     },
     css: { postcss: { plugins: [tailwindcss()] } },
@@ -62,10 +75,18 @@ export default defineConfig(async () => {
       : undefined,
     plugins: [
       vinext(),
-      sites(),
+      ...(direct ? [] : [sites()]),
       cloudflare({
         viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-        config: localBindingConfig,
+        config: direct
+          ? {
+              ...directConfig,
+              d1_databases: directConfig.d1_databases.map((database) => ({
+                ...database,
+                migrations_dir: resolve('drizzle'),
+              })),
+            }
+          : localBindingConfig,
       }),
     ],
   };
